@@ -16,6 +16,13 @@ Route::get('/health', function() {
     ]);
 });
 
+Route::get('/test-db', function () {
+    return [
+        'host' => config('database.connections.mysql.host'),
+        'db' => config('database.connections.mysql.database'),
+    ];
+});
+
 /*PUBLIC ROUTES*/
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
