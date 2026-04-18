@@ -8,6 +8,19 @@ use App\Http\Controllers\ChatController;
 
 /*PUBLIC ROUTES*/
 
+Route::get('/health', function() {
+    return response()->json([
+        'status' => 'ok',
+        'service' => 'Backend Red Product API',
+        'timestamp' => now()
+    ]);
+});
+
+/*PUBLIC ROUTES*/
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
