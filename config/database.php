@@ -44,25 +44,24 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
-        'mysql' => [
-            'driver' => 'mysql',
-            'url' => env('DB_URL'),
-            'host' => env('MYSQLHOST', '127.0.0.1'),        // ← Changé: DB_HOST → MYSQLHOST
-            'port' => env('MYSQLPORT', '3306'),             // ← Changé: DB_PORT → MYSQLPORT
-            'database' => env('MYSQLDATABASE', 'laravel'),  // ← Changé: DB_DATABASE → MYSQLDATABASE
-            'username' => env('MYSQLUSER', 'root'),         // ← Changé: DB_USERNAME → MYSQLUSER
-            'password' => env('MYSQLPASSWORD', ''),         // ← Changé: DB_PASSWORD → MYSQLPASSWORD
-            'unix_socket' => env('DB_SOCKET', ''),
-            'charset' => env('DB_CHARSET', 'utf8mb4'),
-            'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => true,
-            'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
-            ]) : [],
-        ],
+    'mysql' => [
+    'driver' => 'mysql',
+    'host' => env('MYSQLHOST', '127.0.0.1'),
+    'port' => env('MYSQLPORT', '3306'),
+    'database' => env('MYSQLDATABASE', 'laravel'),
+    'username' => env('MYSQLUSER', 'root'),
+    'password' => env('MYSQLPASSWORD', ''),
+    'unix_socket' => env('DB_SOCKET', ''),
+    'charset' => env('DB_CHARSET', 'utf8mb4'),
+    'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
+    'prefix' => '',
+    'prefix_indexes' => true,
+    'strict' => true,
+    'engine' => null,
+    'options' => extension_loaded('pdo_mysql') ? array_filter([
+        PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+    ]) : [],
+],
 
         'mariadb' => [
             'driver' => 'mariadb',
