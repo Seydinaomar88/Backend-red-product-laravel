@@ -1,0 +1,8 @@
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "php-fpm -D && nginx -g 'daemon off;'"
+  }
+}
