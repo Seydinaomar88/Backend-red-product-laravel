@@ -3,6 +3,6 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "php-fpm -D && nginx -g 'daemon off;'"
+    "startCommand": "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT"
   }
 }
