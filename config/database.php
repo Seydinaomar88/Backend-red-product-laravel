@@ -44,13 +44,13 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
-   'mysql' => [
+ 'mysql' => [
     'driver' => 'mysql',
-    'host' => env('DB_HOST', '127.0.0.1'),
-    'port' => env('DB_PORT', '3306'),
-    'database' => env('DB_DATABASE', 'laravel'),
-    'username' => env('DB_USERNAME', 'root'),
-    'password' => env('DB_PASSWORD', ''),
+    'host' => env('MYSQLHOST', '127.0.0.1'),        // ← Changé: DB_HOST → MYSQLHOST
+    'port' => env('MYSQLPORT', '3306'),             // ← Changé: DB_PORT → MYSQLPORT
+    'database' => env('MYSQLDATABASE', 'laravel'),  // ← Changé: DB_DATABASE → MYSQLDATABASE
+    'username' => env('MYSQLUSER', 'root'),         // ← Changé: DB_USERNAME → MYSQLUSER
+    'password' => env('MYSQLPASSWORD', ''),         // ← Changé: DB_PASSWORD → MYSQLPASSWORD
     'unix_socket' => env('DB_SOCKET', ''),
     'charset' => 'utf8mb4',
     'collation' => 'utf8mb4_unicode_ci',
