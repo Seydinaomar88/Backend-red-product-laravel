@@ -4,6 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -12,16 +13,36 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-   ->withExceptions(function (Exceptions $exceptions): void {
-    $exceptions->render(function (AuthenticationException $e, $request) {
-        // Si la requête attend du JSON (API)
-        if ($request->expectsJson() || str_starts_with($request->path(), 'api')) {
-            return response()->json([
-                'message' => 'Unauthenticated. Please login first.'
-            ], 401);
-        }
+    ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->api(prepend: [
+            \Illuminate\Http\Middleware\HandleCors::class,
+        ]);
         
-        return redirect()->guest(route('login'));
-    });
-})
+        // Force JSON response for all API requests
+        $middleware->api(append: [
+            function ($request, $next) {
+                $request->headers->set('Accept', 'application/json');
+                return $next($request);
+            }
+        ]);
+    })
+    ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
+        });
+        
+        $exceptions->render(function (Throwable $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'status' => 'error'
+                ], 500);
+            }
+            return parent::render($request, $e);
+        });
+    })
     ->create();
