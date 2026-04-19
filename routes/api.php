@@ -22,6 +22,11 @@ Route::get('/test-db', function () {
     ];
 });
 
+// Route de test SIMPLE - avant tout
+Route::get('/simple-test', function() {
+    return response()->json(['message' => 'API is working!']);
+});
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
