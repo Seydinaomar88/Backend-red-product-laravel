@@ -17,14 +17,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [
             \Illuminate\Http\Middleware\HandleCors::class,
         ]);
-        
-        // Force JSON response for all API requests
-        $middleware->api(append: [
-            function ($request, $next) {
-                $request->headers->set('Accept', 'application/json');
-                return $next($request);
-            }
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (AuthenticationException $e, Request $request) {
