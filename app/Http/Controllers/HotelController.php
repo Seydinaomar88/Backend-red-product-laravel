@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Hotel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;  
 
 class HotelController extends Controller
 {
@@ -13,29 +14,42 @@ class HotelController extends Controller
      */
     public function index(Request $request)
     {
-        $hotels = Hotel::where('user_id', $request->user()->id)
-            ->latest()
-            ->get();
-
-        // Transformer les données pour correspondre au format attendu par le frontend
-        $hotels = $hotels->map(function ($hotel) {
-            return [
-                'id' => $hotel->id,
-                'name' => $hotel->name,
-                'address' => $hotel->address,
-                'email' => $hotel->email,
-                'phone' => $hotel->telephone,      // mapping telephone -> phone
-                'pricePerNight' => $hotel->price,  // mapping price -> pricePerNight
-                'currency' => $hotel->currency,
-                'photo' => $hotel->image,          // mapping image -> photo
-                'created_at' => $hotel->created_at,
-                'updated_at' => $hotel->updated_at,
-            ];
-        });
-
-        return response()->json([
-            'hotels' => $hotels
-        ]);
+        try {
+            $userId = $request->user()->id;
+            Log::info('User ID:', ['id' => $userId]);
+            
+            $hotels = Hotel::where('user_id', $userId)
+                ->latest()
+                ->get();
+            
+            Log::info('Hotels found:', ['count' => $hotels->count()]);
+            
+            // Transformer les données
+            $formattedHotels = $hotels->map(function ($hotel) {
+                return [
+                    'id' => $hotel->id,
+                    'name' => $hotel->name,
+                    'address' => $hotel->address,
+                    'email' => $hotel->email,
+                    'phone' => $hotel->telephone ?? '',
+                    'pricePerNight' => (float)$hotel->price,
+                    'currency' => $hotel->currency ?? 'XOF',
+                    'photo' => $hotel->image,
+                    'created_at' => $hotel->created_at,
+                    'updated_at' => $hotel->updated_at,
+                ];
+            });
+            
+            return response()->json([
+                'hotels' => $formattedHotels
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Hotels error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
