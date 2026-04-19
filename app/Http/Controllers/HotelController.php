@@ -17,6 +17,22 @@ class HotelController extends Controller
             ->latest()
             ->get();
 
+        // Transformer les données pour correspondre au format attendu par le frontend
+        $hotels = $hotels->map(function ($hotel) {
+            return [
+                'id' => $hotel->id,
+                'name' => $hotel->name,
+                'address' => $hotel->address,
+                'email' => $hotel->email,
+                'phone' => $hotel->telephone,      // mapping telephone -> phone
+                'pricePerNight' => $hotel->price,  // mapping price -> pricePerNight
+                'currency' => $hotel->currency,
+                'photo' => $hotel->image,          // mapping image -> photo
+                'created_at' => $hotel->created_at,
+                'updated_at' => $hotel->updated_at,
+            ];
+        });
+
         return response()->json([
             'hotels' => $hotels
         ]);
@@ -28,50 +44,56 @@ class HotelController extends Controller
     public function store(Request $request)
     {
         try {
-
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'address' => 'required|string|max:255',
                 'email' => 'required|email|max:255',
-                'telephone',
-                'price' => 'required|numeric|min:0',
+                'phone' => 'nullable|string|max:20',        // frontend envoie 'phone'
+                'pricePerNight' => 'required|numeric|min:0', // frontend envoie 'pricePerNight'
                 'currency' => 'nullable|string|max:10',
-                'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+                'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048', // frontend envoie 'photo'
             ]);
 
             $imagePath = null;
 
             // Upload image
-            if ($request->hasFile('image')) {
-
-                $file = $request->file('image');
-
+            if ($request->hasFile('photo')) {  // ← 'photo' au lieu de 'image'
+                $file = $request->file('photo');
                 $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-
                 $file->storeAs('hotels', $fileName, 'public');
-
                 $imagePath = 'hotels/' . $fileName;
             }
 
-            // Création
+            // Création avec mapping des champs
             $hotel = Hotel::create([
                 'name' => $validated['name'],
                 'address' => $validated['address'],
                 'email' => $validated['email'],
-                'telephone' => $validated['telephone'] ?? null,
-                'price' => $validated['price'],
+                'telephone' => $validated['phone'] ?? null,           // mapping phone -> telephone
+                'price' => $validated['pricePerNight'],               // mapping pricePerNight -> price
                 'currency' => $validated['currency'] ?? 'XOF',
-                'image' => $imagePath,
+                'image' => $imagePath,                                // mapping photo -> image
                 'user_id' => $request->user()->id,
             ]);
 
+            // Retourner au format frontend
             return response()->json([
                 'message' => 'Hotel created successfully',
-                'hotel' => $hotel
+                'hotel' => [
+                    'id' => $hotel->id,
+                    'name' => $hotel->name,
+                    'address' => $hotel->address,
+                    'email' => $hotel->email,
+                    'phone' => $hotel->telephone,
+                    'pricePerNight' => $hotel->price,
+                    'currency' => $hotel->currency,
+                    'photo' => $hotel->image,
+                    'created_at' => $hotel->created_at,
+                    'updated_at' => $hotel->updated_at,
+                ]
             ], 201);
 
         } catch (\Exception $e) {
-
             return response()->json([
                 'message' => 'Error creating hotel',
                 'error' => $e->getMessage()
@@ -91,8 +113,20 @@ class HotelController extends Controller
             ], 403);
         }
 
+        // Retourner au format frontend
         return response()->json([
-            'hotel' => $hotel
+            'hotel' => [
+                'id' => $hotel->id,
+                'name' => $hotel->name,
+                'address' => $hotel->address,
+                'email' => $hotel->email,
+                'phone' => $hotel->telephone,
+                'pricePerNight' => $hotel->price,
+                'currency' => $hotel->currency,
+                'photo' => $hotel->image,
+                'created_at' => $hotel->created_at,
+                'updated_at' => $hotel->updated_at,
+            ]
         ]);
     }
 
@@ -102,8 +136,7 @@ class HotelController extends Controller
     public function update(Request $request, Hotel $hotel)
     {
         try {
-
-            //  Protection
+            // Protection
             if ($hotel->user_id !== $request->user()->id) {
                 return response()->json([
                     'message' => 'Unauthorized'
@@ -114,37 +147,51 @@ class HotelController extends Controller
                 'name' => 'sometimes|required|string|max:255',
                 'address' => 'sometimes|required|string|max:255',
                 'email' => 'sometimes|required|email|max:255',
-                'telephone' => 'sometimes|nullable|string|max:20',
-                'price' => 'sometimes|required|numeric|min:0',
+                'phone' => 'sometimes|nullable|string|max:20',
+                'pricePerNight' => 'sometimes|required|numeric|min:0',
                 'currency' => 'nullable|string|max:10',
-                'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+                'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             ]);
 
             // Update image
-            if ($request->hasFile('image')) {
-
+            if ($request->hasFile('photo')) {
                 if ($hotel->image) {
                     Storage::disk('public')->delete($hotel->image);
                 }
 
-                $file = $request->file('image');
-
+                $file = $request->file('photo');
                 $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-
                 $file->storeAs('hotels', $fileName, 'public');
-
-                $validated['image'] = 'hotels/' . $fileName;
+                $hotel->image = 'hotels/' . $fileName;
             }
 
-            $hotel->update($validated);
+            // Mise à jour avec mapping
+            if (isset($validated['name'])) $hotel->name = $validated['name'];
+            if (isset($validated['address'])) $hotel->address = $validated['address'];
+            if (isset($validated['email'])) $hotel->email = $validated['email'];
+            if (isset($validated['phone'])) $hotel->telephone = $validated['phone'];
+            if (isset($validated['pricePerNight'])) $hotel->price = $validated['pricePerNight'];
+            if (isset($validated['currency'])) $hotel->currency = $validated['currency'];
+            
+            $hotel->save();
 
             return response()->json([
                 'message' => 'Hotel updated successfully',
-                'hotel' => $hotel->fresh()
+                'hotel' => [
+                    'id' => $hotel->id,
+                    'name' => $hotel->name,
+                    'address' => $hotel->address,
+                    'email' => $hotel->email,
+                    'phone' => $hotel->telephone,
+                    'pricePerNight' => $hotel->price,
+                    'currency' => $hotel->currency,
+                    'photo' => $hotel->image,
+                    'created_at' => $hotel->created_at,
+                    'updated_at' => $hotel->updated_at,
+                ]
             ]);
 
         } catch (\Exception $e) {
-
             return response()->json([
                 'message' => 'Error updating hotel',
                 'error' => $e->getMessage()
@@ -158,7 +205,6 @@ class HotelController extends Controller
     public function destroy(Request $request, Hotel $hotel)
     {
         try {
-
             // Protection
             if ($hotel->user_id !== $request->user()->id) {
                 return response()->json([
@@ -177,7 +223,6 @@ class HotelController extends Controller
             ]);
 
         } catch (\Exception $e) {
-
             return response()->json([
                 'message' => 'Error deleting hotel',
                 'error' => $e->getMessage()
