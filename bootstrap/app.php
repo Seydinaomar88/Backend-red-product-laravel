@@ -12,18 +12,16 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->api(prepend: [
-            \Illuminate\Http\Middleware\HandleCors::class,
-        ]);
-    })
-    ->withExceptions(function (Exceptions $exceptions): void {
-
-        $exceptions->render(function (AuthenticationException $e, $request) {
+   ->withExceptions(function (Exceptions $exceptions): void {
+    $exceptions->render(function (AuthenticationException $e, $request) {
+        // Si la requête attend du JSON (API)
+        if ($request->expectsJson() || str_starts_with($request->path(), 'api')) {
             return response()->json([
-                'message' => 'Unauthenticated'
+                'message' => 'Unauthenticated. Please login first.'
             ], 401);
-        });
-
-    })
+        }
+        
+        return redirect()->guest(route('login'));
+    });
+})
     ->create();
