@@ -59,3 +59,12 @@ Route::middleware('auth:sanctum')->group(function () {
     
     Route::post('/chat', [ChatController::class, 'chat']);
 });
+
+// Ajoutez à la fin du fichier, en dehors du middleware auth
+Route::get('/storage/{path}', function ($path) {
+    $fullPath = storage_path('app/public/' . $path);
+    if (!file_exists($fullPath)) {
+        return response()->json(['message' => 'Image not found'], 404);
+    }
+    return response()->file($fullPath);
+})->where('path', '.*');
