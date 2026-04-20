@@ -1,13 +1,19 @@
 <?php
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\HotelController;
 use App\Http\Controllers\ChatController;
-use Illuminate\Support\Facades\Storage;
 
-/* PUBLIC ROUTES */
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+*/
+
+// ==================== ROUTES PUBLIQUES ====================
+
+// Health check
 Route::get('/health', function() {
     return response()->json([
         'status' => 'ok',
@@ -16,51 +22,18 @@ Route::get('/health', function() {
     ]);
 });
 
-Route::get('/test-db', function () {
-    return [
-        'host' => config('database.connections.mysql.host'),
-        'db' => config('database.connections.mysql.database'),
-    ];
+// Test simple
+Route::get('/ping', function() {
+    return response()->json(['message' => 'pong']);
 });
 
-// Route de test SIMPLE - avant tout
-Route::get('/simple-test', function() {
-    return response()->json(['message' => 'API is working!']);
-});
-
+// Authentification
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
-// ROUTE POUR LES IMAGES (PUBLIQUE )
-Route::get('/image/{path}', function ($path) {
-    $fullPath = storage_path('app/public/' . $path);
-    
-    if (!file_exists($fullPath)) {
-        return response()->json(['message' => 'Image not found'], 404);
-    }
-    
-    return response()->file($fullPath);
-})->where('path', '.*');
-
-/* PROTECTED ROUTES */
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/me', [AuthController::class, 'me']);
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::put('/user', [AuthController::class, 'update']);
-    Route::delete('/user', [AuthController::class, 'delete']);
-    
-    Route::get('/hotels', [HotelController::class, 'index']);
-    Route::post('/hotels', [HotelController::class, 'store']);
-    Route::get('/hotels/{hotel}', [HotelController::class, 'show']);
-    Route::put('/hotels/{hotel}', [HotelController::class, 'update']);
-    Route::delete('/hotels/{hotel}', [HotelController::class, 'destroy']);
-    
-    Route::post('/chat', [ChatController::class, 'chat']);
-});
-
-// Ajoutez à la fin du fichier, en dehors du middleware auth
+// Images (public)
 Route::get('/storage/{path}', function ($path) {
     $fullPath = storage_path('app/public/' . $path);
     if (!file_exists($fullPath)) {
@@ -68,3 +41,20 @@ Route::get('/storage/{path}', function ($path) {
     }
     return response()->file($fullPath);
 })->where('path', '.*');
+
+// ==================== ROUTES PROTÉGÉES ====================
+
+Route::middleware('auth:sanctum')->group(function () {
+    
+    // Utilisateur
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::put('/user', [AuthController::class, 'update']);
+    Route::delete('/user', [AuthController::class, 'delete']);
+    
+    // Hôtels (CRUD complet)
+    Route::apiResource('hotels', HotelController::class);
+    
+    // Chat
+    Route::post('/chat', [ChatController::class, 'chat']);
+});
