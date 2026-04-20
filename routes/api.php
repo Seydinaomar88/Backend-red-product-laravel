@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\HotelController;
 use App\Http\Controllers\ChatController;
+use Illuminate\Support\Facades\Storage;
 
 /* PUBLIC ROUTES */
 Route::get('/health', function() {
@@ -31,6 +32,17 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+
+// ROUTE POUR LES IMAGES (PUBLIQUE )
+Route::get('/image/{path}', function ($path) {
+    $fullPath = storage_path('app/public/' . $path);
+    
+    if (!file_exists($fullPath)) {
+        return response()->json(['message' => 'Image not found'], 404);
+    }
+    
+    return response()->file($fullPath);
+})->where('path', '.*');
 
 /* PROTECTED ROUTES */
 Route::middleware('auth:sanctum')->group(function () {
