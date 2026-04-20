@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Hotel;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;  
+use Illuminate\Support\Facades\Log;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class HotelController extends Controller
 {
@@ -24,7 +24,6 @@ class HotelController extends Controller
             
             Log::info('Hotels found:', ['count' => $hotels->count()]);
             
-            // Transformer les données
             $formattedHotels = $hotels->map(function ($hotel) {
                 return [
                     'id' => $hotel->id,
@@ -53,7 +52,7 @@ class HotelController extends Controller
     }
 
     /**
-     * CREATE HOTEL
+     * CREATE HOTEL (avec Cloudinary)
      */
     public function store(Request $request)
     {
@@ -62,35 +61,33 @@ class HotelController extends Controller
                 'name' => 'required|string|max:255',
                 'address' => 'required|string|max:255',
                 'email' => 'required|email|max:255',
-                'phone' => 'nullable|string|max:20',        // frontend envoie 'phone'
-                'pricePerNight' => 'required|numeric|min:0', // frontend envoie 'pricePerNight'
+                'phone' => 'nullable|string|max:20',
+                'pricePerNight' => 'required|numeric|min:0',
                 'currency' => 'nullable|string|max:10',
-                'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048', // frontend envoie 'photo'
+                'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             ]);
 
-            $imagePath = null;
+            $imageUrl = null;
 
-            // Upload image
-            if ($request->hasFile('photo')) {  // ← 'photo' au lieu de 'image'
-                $file = $request->file('photo');
-                $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('hotels', $fileName, 'public');
-                $imagePath = 'hotels/' . $fileName;
+            // Upload vers Cloudinary
+            if ($request->hasFile('photo')) {
+                $uploadedFile = Cloudinary::upload($request->file('photo')->getRealPath(), [
+                    'folder' => 'hotels'
+                ]);
+                $imageUrl = $uploadedFile->getSecurePath();
             }
 
-            // Création avec mapping des champs
             $hotel = Hotel::create([
                 'name' => $validated['name'],
                 'address' => $validated['address'],
                 'email' => $validated['email'],
-                'telephone' => $validated['phone'] ?? null,           // mapping phone -> telephone
-                'price' => $validated['pricePerNight'],               // mapping pricePerNight -> price
+                'telephone' => $validated['phone'] ?? null,
+                'price' => $validated['pricePerNight'],
                 'currency' => $validated['currency'] ?? 'XOF',
-                'image' => $imagePath,                                // mapping photo -> image
+                'image' => $imageUrl,
                 'user_id' => $request->user()->id,
             ]);
 
-            // Retourner au format frontend
             return response()->json([
                 'message' => 'Hotel created successfully',
                 'hotel' => [
@@ -108,9 +105,9 @@ class HotelController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
+            Log::error('Store error: ' . $e->getMessage());
             return response()->json([
-                'message' => 'Error creating hotel',
-                'error' => $e->getMessage()
+                'message' => 'Error creating hotel: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -120,14 +117,12 @@ class HotelController extends Controller
      */
     public function show(Request $request, Hotel $hotel)
     {
-        // Protection
         if ($hotel->user_id !== $request->user()->id) {
             return response()->json([
                 'message' => 'Unauthorized'
             ], 403);
         }
 
-        // Retourner au format frontend
         return response()->json([
             'hotel' => [
                 'id' => $hotel->id,
@@ -150,7 +145,6 @@ class HotelController extends Controller
     public function update(Request $request, Hotel $hotel)
     {
         try {
-            // Protection
             if ($hotel->user_id !== $request->user()->id) {
                 return response()->json([
                     'message' => 'Unauthorized'
@@ -167,19 +161,14 @@ class HotelController extends Controller
                 'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             ]);
 
-            // Update image
+            // Upload nouvelle image vers Cloudinary
             if ($request->hasFile('photo')) {
-                if ($hotel->image) {
-                    Storage::disk('public')->delete($hotel->image);
-                }
-
-                $file = $request->file('photo');
-                $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('hotels', $fileName, 'public');
-                $hotel->image = 'hotels/' . $fileName;
+                $uploadedFile = Cloudinary::upload($request->file('photo')->getRealPath(), [
+                    'folder' => 'hotels'
+                ]);
+                $hotel->image = $uploadedFile->getSecurePath();
             }
 
-            // Mise à jour avec mapping
             if (isset($validated['name'])) $hotel->name = $validated['name'];
             if (isset($validated['address'])) $hotel->address = $validated['address'];
             if (isset($validated['email'])) $hotel->email = $validated['email'];
@@ -206,9 +195,9 @@ class HotelController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            Log::error('Update error: ' . $e->getMessage());
             return response()->json([
-                'message' => 'Error updating hotel',
-                'error' => $e->getMessage()
+                'message' => 'Error updating hotel: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -219,15 +208,10 @@ class HotelController extends Controller
     public function destroy(Request $request, Hotel $hotel)
     {
         try {
-            // Protection
             if ($hotel->user_id !== $request->user()->id) {
                 return response()->json([
                     'message' => 'Unauthorized'
                 ], 403);
-            }
-
-            if ($hotel->image) {
-                Storage::disk('public')->delete($hotel->image);
             }
 
             $hotel->delete();
@@ -237,9 +221,9 @@ class HotelController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            Log::error('Delete error: ' . $e->getMessage());
             return response()->json([
-                'message' => 'Error deleting hotel',
-                'error' => $e->getMessage()
+                'message' => 'Error deleting hotel: ' . $e->getMessage()
             ], 500);
         }
     }
