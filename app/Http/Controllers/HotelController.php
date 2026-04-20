@@ -10,7 +10,7 @@ use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 class HotelController extends Controller
 {
     /**
-     * LIST HOTELS (seulement ceux de l'utilisateur)
+     * LIST HOTELS
      */
     public function index(Request $request)
     {
@@ -21,8 +21,6 @@ class HotelController extends Controller
             $hotels = Hotel::where('user_id', $userId)
                 ->latest()
                 ->get();
-            
-            Log::info('Hotels found:', ['count' => $hotels->count()]);
             
             $formattedHotels = $hotels->map(function ($hotel) {
                 return [
@@ -39,15 +37,11 @@ class HotelController extends Controller
                 ];
             });
             
-            return response()->json([
-                'hotels' => $formattedHotels
-            ]);
+            return response()->json(['hotels' => $formattedHotels]);
             
         } catch (\Exception $e) {
             Log::error('Hotels error: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error: ' . $e->getMessage()
-            ], 500);
+            return response()->json(['message' => 'Error: ' . $e->getMessage()], 500);
         }
     }
 
@@ -99,16 +93,12 @@ class HotelController extends Controller
                     'pricePerNight' => $hotel->price,
                     'currency' => $hotel->currency,
                     'photo' => $hotel->image,
-                    'created_at' => $hotel->created_at,
-                    'updated_at' => $hotel->updated_at,
                 ]
             ], 201);
 
         } catch (\Exception $e) {
             Log::error('Store error: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error creating hotel: ' . $e->getMessage()
-            ], 500);
+            return response()->json(['message' => 'Error creating hotel: ' . $e->getMessage()], 500);
         }
     }
 
@@ -118,9 +108,7 @@ class HotelController extends Controller
     public function show(Request $request, Hotel $hotel)
     {
         if ($hotel->user_id !== $request->user()->id) {
-            return response()->json([
-                'message' => 'Unauthorized'
-            ], 403);
+            return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         return response()->json([
@@ -133,8 +121,6 @@ class HotelController extends Controller
                 'pricePerNight' => $hotel->price,
                 'currency' => $hotel->currency,
                 'photo' => $hotel->image,
-                'created_at' => $hotel->created_at,
-                'updated_at' => $hotel->updated_at,
             ]
         ]);
     }
@@ -146,9 +132,7 @@ class HotelController extends Controller
     {
         try {
             if ($hotel->user_id !== $request->user()->id) {
-                return response()->json([
-                    'message' => 'Unauthorized'
-                ], 403);
+                return response()->json(['message' => 'Unauthorized'], 403);
             }
 
             $validated = $request->validate([
@@ -161,7 +145,6 @@ class HotelController extends Controller
                 'photo' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             ]);
 
-            // Upload nouvelle image vers Cloudinary
             if ($request->hasFile('photo')) {
                 $uploadedFile = Cloudinary::upload($request->file('photo')->getRealPath(), [
                     'folder' => 'hotels'
@@ -189,16 +172,12 @@ class HotelController extends Controller
                     'pricePerNight' => $hotel->price,
                     'currency' => $hotel->currency,
                     'photo' => $hotel->image,
-                    'created_at' => $hotel->created_at,
-                    'updated_at' => $hotel->updated_at,
                 ]
             ]);
 
         } catch (\Exception $e) {
             Log::error('Update error: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error updating hotel: ' . $e->getMessage()
-            ], 500);
+            return response()->json(['message' => 'Error updating hotel: ' . $e->getMessage()], 500);
         }
     }
 
@@ -209,22 +188,16 @@ class HotelController extends Controller
     {
         try {
             if ($hotel->user_id !== $request->user()->id) {
-                return response()->json([
-                    'message' => 'Unauthorized'
-                ], 403);
+                return response()->json(['message' => 'Unauthorized'], 403);
             }
 
             $hotel->delete();
 
-            return response()->json([
-                'message' => 'Hotel deleted successfully'
-            ]);
+            return response()->json(['message' => 'Hotel deleted successfully']);
 
         } catch (\Exception $e) {
             Log::error('Delete error: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error deleting hotel: ' . $e->getMessage()
-            ], 500);
+            return response()->json(['message' => 'Error deleting hotel: ' . $e->getMessage()], 500);
         }
     }
 }
