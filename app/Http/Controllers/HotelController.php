@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Hotel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
+use Cloudinary\Cloudinary;
 
 class HotelController extends Controller
 {
@@ -65,10 +65,11 @@ class HotelController extends Controller
 
             // Upload vers Cloudinary
             if ($request->hasFile('photo')) {
-                $uploadedFile = Cloudinary::upload($request->file('photo')->getRealPath(), [
+                $cloudinary = new Cloudinary(env('CLOUDINARY_URL'));
+                $upload = $cloudinary->uploadApi()->upload($request->file('photo')->getRealPath(), [
                     'folder' => 'hotels'
                 ]);
-                $imageUrl = $uploadedFile->getSecurePath();
+                $imageUrl = $upload['secure_url'];
             }
 
             $hotel = Hotel::create([
@@ -146,10 +147,11 @@ class HotelController extends Controller
             ]);
 
             if ($request->hasFile('photo')) {
-                $uploadedFile = Cloudinary::upload($request->file('photo')->getRealPath(), [
+                $cloudinary = new Cloudinary(env('CLOUDINARY_URL'));
+                $upload = $cloudinary->uploadApi()->upload($request->file('photo')->getRealPath(), [
                     'folder' => 'hotels'
                 ]);
-                $hotel->image = $uploadedFile->getSecurePath();
+                $hotel->image = $upload['secure_url'];
             }
 
             if (isset($validated['name'])) $hotel->name = $validated['name'];
