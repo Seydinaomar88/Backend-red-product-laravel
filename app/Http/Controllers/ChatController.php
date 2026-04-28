@@ -11,7 +11,7 @@ use App\Models\Hotel;
 class ChatController extends Controller
 {
     /**
-     * Point d'entrée principal du chat
+     * Point d'entrée principal du chat - Assistant naturel
      */
     public function chat(Request $request): JsonResponse
     {
@@ -29,363 +29,201 @@ class ChatController extends Controller
         /** @var Builder $query */
         $query = Hotel::where('user_id', $userId);
         
-        // Détection et application de la recherche
-        $result = $this->handleSearch($message, $query, $userCurrency);
+        // Traitement de la demande comme un vrai assistant
+        $result = $this->processNaturalQuery($message, $query, $userCurrency);
         
         return $result;
     }
     
     /**
-     * Gère la recherche selon le type détecté
+     * Traite la requête de manière naturelle
      */
-    private function handleSearch(string $message, Builder $query, string $userCurrency): JsonResponse
+    private function processNaturalQuery(string $message, Builder $query, string $userCurrency): JsonResponse
     {
-        // Détection du type de recherche
-        $searchType = $this->detectSearchType($message);
-        
-        // Gestion des salutations
-        if ($searchType === 'greeting') {
-            return $this->greetingResponse();
+        // 1. Vérifier les salutations
+        if ($this->isGreeting($message)) {
+            return $this->naturalGreeting();
         }
         
-        // Gestion de l'aide
-        if ($searchType === 'help') {
-            return $this->helpResponse();
+        // 2. Remerciements
+        if ($this->isThankYou($message)) {
+            return $this->thankYouResponse();
         }
         
-        // Application des filtres selon le type
-        $hasFilter = $this->applyFilters($searchType, $message, $query);
+        // 3. Extraire l'intention de la phrase
+        $intent = $this->extractIntent($message);
         
-        // Si aucun filtre valide
-        if (!$hasFilter) {
-            return $this->helpResponse();
-        }
+        // 4. Appliquer les filtres en fonction de l'intention
+        $hasFilter = $this->applyNaturalFilters($message, $query);
         
-        // Exécution de la recherche
+        // 5. Exécuter la recherche
         /** @var Collection $hotels */
         $hotels = $query->limit(10)->get();
         
-        // Retourner les résultats formatés
-        return $this->formatResponse($hotels, $searchType, $message, $userCurrency);
+        // 6. Répondre de manière naturelle
+        return $this->naturalResponse($hotels, $message, $userCurrency, $intent);
     }
     
     /**
-     * Détecte le type de recherche à partir du message
+     * Vérifie si c'est une salutation
      */
-    private function detectSearchType(string $message): string
+    private function isGreeting(string $message): bool
     {
-        // Salutations
-        $greetings = ['bonjour', 'salut', 'coucou', 'hello', 'hi', 'hey'];
+        $greetings = ['bonjour', 'salut', 'coucou', 'hello', 'hi', 'hey', 'bonsoir', 'bonsoir'];
         foreach ($greetings as $greeting) {
             if (str_contains($message, $greeting)) {
-                return 'greeting';
-            }
-        }
-        
-        // Aide
-        if ($message === 'aide' || $message === 'help' || $message === '?') {
-            return 'help';
-        }
-        
-        // Recherche par NOM
-        if (str_contains($message, 'nom') || 
-            str_contains($message, 'appelle') || 
-            (str_contains($message, 'cherche') && str_contains($message, 'hotel'))) {
-            return 'name';
-        }
-        
-        // Recherche par CONTACT (téléphone ou email)
-        if (str_contains($message, 'contact') || 
-            str_contains($message, 'telephone') || 
-            str_contains($message, 'tel') || 
-            str_contains($message, 'phone') ||
-            str_contains($message, 'email') ||
-            str_contains($message, '@')) {
-            return 'contact';
-        }
-        
-        // Recherche par ADRESSE
-        if (str_contains($message, 'adresse') || 
-            str_contains($message, 'rue') || 
-            str_contains($message, 'quartier') ||
-            str_contains($message, 'situé') ||
-            str_contains($message, 'localisation')) {
-            return 'address';
-        }
-        
-        // Recherche par PRIX
-        if (str_contains($message, 'prix') || preg_match('/\d+/', $message)) {
-            
-            // Entre deux prix
-            if (str_contains($message, 'entre') && str_contains($message, 'et')) {
-                return 'price_range';
-            }
-            
-            // Moins de / inférieur
-            if (str_contains($message, 'moins') || 
-                str_contains($message, 'inférieur') || 
-                str_contains($message, '<')) {
-                return 'max_price';
-            }
-            
-            // Plus de / supérieur
-            if (str_contains($message, 'plus') || 
-                str_contains($message, 'supérieur') || 
-                str_contains($message, '>')) {
-                return 'min_price';
-            }
-            
-            // Prix exact
-            if (str_contains($message, 'à ') || 
-                str_contains($message, 'exact') || 
-                str_contains($message, '=')) {
-                return 'exact_price';
-            }
-            
-            // Juste un chiffre
-            if (preg_match('/^\d+$/', trim($message))) {
-                return 'exact_price';
-            }
-        }
-        
-        // Liste tous les hôtels
-        if (str_contains($message, 'tous') || 
-            str_contains($message, 'liste') || 
-            str_contains($message, 'tout')) {
-            return 'all_hotels';
-        }
-        
-        // Recherche par ville/zone (fallback)
-        $zones = ['dakar', 'ngor', 'saly', 'mbour', 'plateau', 'almadie', 'yoff', 'ouakam'];
-        foreach ($zones as $zone) {
-            if (str_contains($message, $zone)) {
-                return 'address';
-            }
-        }
-        
-        return 'unknown';
-    }
-    
-    /**
-     * Applique les filtres selon le type de recherche
-     */
-    private function applyFilters(string $searchType, string $message, Builder $query): bool
-    {
-        switch ($searchType) {
-            case 'name':
-                $hotelName = $this->extractHotelName($message);
-                if (!empty($hotelName)) {
-                    $query->where('name', 'like', "%{$hotelName}%");
-                    return true;
-                }
-                break;
-                
-            case 'exact_price':
-                $price = $this->extractPrice($message);
-                if ($price > 0) {
-                    $query->where('price', $price);
-                    return true;
-                }
-                break;
-                
-            case 'max_price':
-                $price = $this->extractPrice($message);
-                if ($price > 0) {
-                    $query->where('price', '<=', $price);
-                    return true;
-                }
-                break;
-                
-            case 'min_price':
-                $price = $this->extractPrice($message);
-                if ($price > 0) {
-                    $query->where('price', '>=', $price);
-                    return true;
-                }
-                break;
-                
-            case 'price_range':
-                $prices = $this->extractPriceRange($message);
-                if ($prices['min'] > 0 && $prices['max'] > 0) {
-                    $query->whereBetween('price', [$prices['min'], $prices['max']]);
-                    return true;
-                }
-                break;
-                
-            case 'address':
-                $address = $this->extractAddress($message);
-                if (!empty($address)) {
-                    $query->where('address', 'like', "%{$address}%");
-                    return true;
-                }
-                break;
-                
-            case 'contact':
-                $contact = $this->extractContact($message);
-                if (!empty($contact)) {
-                    if (filter_var($contact, FILTER_VALIDATE_EMAIL)) {
-                        $query->where('email', $contact);
-                    } else {
-                        $query->where('phone', 'like', "%{$contact}%");
-                    }
-                    return true;
-                }
-                break;
-                
-            case 'all_hotels':
-                // Pas de filtre, on retourne tous les hôtels
                 return true;
-                
-            default:
-                return false;
+            }
         }
-        
         return false;
     }
     
     /**
-     * Extrait le nom de l'hôtel du message
+     * Vérifie si c'est un remerciement
      */
-    private function extractHotelName(string $message): string
+    private function isThankYou(string $message): bool
     {
-        $keywords = ['cherche', 'hotel', 'nomme', 'appelle', 'nom', 'trouve'];
-        $name = $message;
-        foreach ($keywords as $keyword) {
-            $name = str_replace($keyword, '', $name);
+        $thanks = ['merci', 'thanks', 'thank you', 'super', 'génial', 'parfait'];
+        foreach ($thanks as $thank) {
+            if (str_contains($message, $thank)) {
+                return true;
+            }
         }
-        return trim($name);
+        return false;
     }
     
     /**
-     * Extrait le prix du message
+     * Extrait l'intention de la phrase
      */
-    private function extractPrice(string $message): int
+    private function extractIntent(string $message): string
     {
-        preg_match('/(\d+)/', $message, $matches);
-        return isset($matches[1]) ? (int)$matches[1] : 0;
+        if (str_contains($message, 'prix') || str_contains($message, 'coûte') || str_contains($message, 'tarif')) {
+            return 'price_query';
+        }
+        if (str_contains($message, 'où') || str_contains($message, 'situé') || str_contains($message, 'adresse')) {
+            return 'location_query';
+        }
+        if (str_contains($message, 'contact') || str_contains($message, 'téléphone') || str_contains($message, 'appeler')) {
+            return 'contact_query';
+        }
+        if (str_contains($message, 'disponible') || str_contains($message, 'libre')) {
+            return 'availability_query';
+        }
+        return 'general_query';
     }
     
     /**
-     * Extrait la fourchette de prix
+     * Applique les filtres de manière naturelle
      */
-    private function extractPriceRange(string $message): array
+    private function applyNaturalFilters(string $message, Builder $query): bool
     {
-        preg_match_all('/(\d+)/', $message, $matches);
-        return [
-            'min' => isset($matches[0][0]) ? (int)$matches[0][0] : 0,
-            'max' => isset($matches[0][1]) ? (int)$matches[0][1] : 0
+        $hasFilter = false;
+        
+        // Extraction des prix
+        preg_match_all('/(\d+)/', $message, $priceMatches);
+        $prices = $priceMatches[0] ?? [];
+        
+        // Prix exact (ex: "un hôtel à 25000")
+        if (str_contains($message, ' à ') && !empty($prices)) {
+            $query->where('price', (int)$prices[0]);
+            $hasFilter = true;
+        }
+        // Moins de X (ex: "moins de 30000" ou "max 30000")
+        elseif ((str_contains($message, 'moins') || str_contains($message, 'max')) && !empty($prices)) {
+            $query->where('price', '<=', (int)$prices[0]);
+            $hasFilter = true;
+        }
+        // Plus de X (ex: "plus de 50000" ou "min 50000")
+        elseif ((str_contains($message, 'plus') || str_contains($message, 'min')) && !empty($prices)) {
+            $query->where('price', '>=', (int)$prices[0]);
+            $hasFilter = true;
+        }
+        // Entre X et Y
+        elseif (str_contains($message, 'entre') && count($prices) >= 2) {
+            $query->whereBetween('price', [(int)$prices[0], (int)$prices[1]]);
+            $hasFilter = true;
+        }
+        
+        // Extraction des villes/zones
+        $zones = [
+            'dakar' => 'Dakar', 'ngor' => 'Ngor', 'almadie' => 'Almadies',
+            'plateau' => 'Plateau', 'yoff' => 'Yoff', 'ouakam' => 'Ouakam',
+            'mermoz' => 'Mermoz', 'sicap' => 'Sicap', 'liberté' => 'Liberté',
+            'saly' => 'Saly', 'mbour' => 'Mbour', 'la somone' => 'La Somone',
+            'lac rose' => 'Lac Rose', 'sine saloum' => 'Sine Saloum'
         ];
-    }
-    
-    /**
-     * Extrait l'adresse du message
-     */
-    private function extractAddress(string $message): string
-    {
-        $keywords = ['adresse', 'situé', 'située', 'localisation', 'rue', 'quartier', 'ville', 'zone', 'à'];
-        $address = $message;
-        foreach ($keywords as $keyword) {
-            $address = str_replace($keyword, '', $address);
-        }
-        return trim($address);
-    }
-    
-    /**
-     * Extrait le contact (email ou téléphone)
-     */
-    private function extractContact(string $message): string
-    {
-        // Chercher un email
-        preg_match('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', $message, $emailMatch);
-        if (!empty($emailMatch)) {
-            return $emailMatch[0];
+        
+        foreach ($zones as $zoneKey => $zoneName) {
+            if (str_contains($message, $zoneKey)) {
+                $query->where('address', 'like', "%{$zoneName}%");
+                $hasFilter = true;
+                break;
+            }
         }
         
-        // Chercher un téléphone (9 à 15 chiffres)
-        preg_match('/(\d{9,15})/', $message, $phoneMatch);
-        if (!empty($phoneMatch)) {
-            return $phoneMatch[0];
+        // Recherche par nom d'hôtel
+        $hotelNames = ['rade', 'terrou', 'radisson', 'king fahd', 'pullman'];
+        foreach ($hotelNames as $name) {
+            if (str_contains($message, $name)) {
+                $query->where('name', 'like', "%{$name}%");
+                $hasFilter = true;
+                break;
+            }
         }
         
-        return '';
+        return $hasFilter;
     }
     
     /**
-     * Réponse de salutation
+     * Réponse naturelle de salutation
      */
-    private function greetingResponse(): JsonResponse
+    private function naturalGreeting(): JsonResponse
     {
+        $replies = [
+            "Bonjour ! 👋 Je suis votre assistant. Dites-moi ce que vous cherchez : un hôtel dans un quartier spécifique, à un certain prix, ou avec des services particuliers ?",
+            "Salut ! 😊 Comment puis-je vous aider à trouver l'hôtel idéal aujourd'hui ? Donnez-moi votre budget ou le quartier souhaité.",
+            "Bonjour et bienvenue ! 🌟 Je suis là pour vous aider à trouver un hôtel. Quel est votre budget ou votre quartier préféré ?"
+        ];
+        
         return response()->json([
             'type' => 'text',
-            'reply' => " Bonjour ! Je suis votre assistant hôtelier professionnel.\n\n" .
-                       "Je peux rechercher des hôtels par :\n" .
-                       "•**Nom** : \"cherche hôtel Rade\"\n" .
-                       "•**Prix exact** : \"hôtel à 25000\"\n" .
-                       "• **Prix max** : \"moins de 30000\"\n" .
-                       "•**Prix min** : \"plus de 50000\"\n" .
-                       "•**Fourchette** : \"entre 20000 et 50000\"\n" .
-                       "•**Adresse** : \"hôtel à Dakar\"\n" .
-                       "•**Contact** : \"cherche 771234567\" ou \"contact@hotel.com\"\n\n" .
-                       "Tapez **aide** pour plus d'exemples"
+            'reply' => $replies[array_rand($replies)]
         ]);
     }
     
     /**
-     * Réponse d'aide
+     * Réponse pour les remerciements
      */
-    private function helpResponse(): JsonResponse
+    private function thankYouResponse(): JsonResponse
     {
+        $replies = [
+            "Avec plaisir ! 😊 N'hésitez pas si je peux faire autre chose pour vous.",
+            "Je vous en prie ! 🎉 Bonne journée et à bientôt.",
+            "Service ! ✨ Si vous avez besoin d'autres informations, je suis là."
+        ];
+        
         return response()->json([
-            'type' => 'help',
-            'reply' => "**Guide d'utilisation du chat**\n\n" .
-                       "**Par NOM :**\n" .
-                       "• \"cherche hôtel Rade\"\n" .
-                       "• \"hôtel qui s'appelle Terrou\"\n\n" .
-                       
-                       "**Par PRIX EXACT :**\n" .
-                       "• \"hôtel à 25000\"\n" .
-                       "• \"prix exact 15000\"\n\n" .
-                       
-                       "**Par PRIX MAX :**\n" .
-                       "• \"moins de 30000\"\n" .
-                       "• \"hôtel à moins de 20000\"\n\n" .
-                       
-                       "**Par PRIX MIN :**\n" .
-                       "• \"plus de 50000\"\n" .
-                       "• \"hôtel supérieur à 100000\"\n\n" .
-                       
-                       "**Par FOURCHETTE :**\n" .
-                       "• \"entre 20000 et 50000\"\n\n" .
-                       
-                       "**Par ADRESSE :**\n" .
-                       "• \"hôtel à Dakar Plateau\"\n" .
-                       "• \"quartier Ngor\"\n\n" .
-                       
-                       "**Par CONTACT :**\n" .
-                       "• \"téléphone 771234567\"\n" .
-                       "• \"email contact@hotel.com\"\n\n" .
-                       
-                       "**Voir TOUS :**\n" .
-                       "• \"liste tous les hôtels\"\n" .
-                       "• \"affiche tout\"\n"
+            'type' => 'text',
+            'reply' => $replies[array_rand($replies)]
         ]);
     }
     
     /**
-     * Formate la réponse selon les résultats
+     * Réponse naturelle selon les résultats
      */
-    private function formatResponse(Collection $hotels, string $searchType, string $message, string $currency): JsonResponse
+    private function naturalResponse(Collection $hotels, string $message, string $currency, string $intent): JsonResponse
     {
         if ($hotels->isEmpty()) {
-            return $this->emptyResponse($searchType, $message, $currency);
+            return $this->noResultsResponse($message, $currency);
         }
         
-        $title = $this->getResultTitle($searchType, $hotels->count(), $message, $currency);
+        // Réponse avec résultats
+        $intro = $this->getNaturalIntro($hotels->count(), $message, $currency);
         
         return response()->json([
             'type' => 'hotels',
             'count' => $hotels->count(),
-            'message' => $title,
+            'message' => $intro,
             'data' => $hotels->map(function (Hotel $hotel) {
                 return [
                     'id' => $hotel->id,
@@ -403,103 +241,91 @@ class ChatController extends Controller
     }
     
     /**
-     * Titre du résultat selon le type de recherche
+     * Introduction naturelle selon le contexte
      */
-    private function getResultTitle(string $searchType, int $count, string $message, string $currency): string
+    private function getNaturalIntro(int $count, string $message, string $currency): string
     {
-        $price = $this->extractPrice($message);
+        // Extraire le prix si présent
+        preg_match('/(\d+)/', $message, $priceMatch);
+        $price = $priceMatch[1] ?? null;
         
-        switch ($searchType) {
-            case 'name':
-                $name = $this->extractHotelName($message);
-                if ($name === '') {
-                    return "{$count} hôtel(s) trouvé(s) :";
-                }
-                return "{$count} hôtel(s) trouvé(s) pour \"{$name}\" :";
-                
-            case 'exact_price':
-                if ($count === 1) {
-                    return "Hôtel à {$price} {$currency} trouvé :";
-                }
-                return "{$count} hôtels à {$price} {$currency} trouvés :";
-                
-            case 'max_price':
-                return "Hôtels à moins de {$price} {$currency} ({$count}) :";
-                
-            case 'min_price':
-                return "Hôtels à plus de {$price} {$currency} ({$count}) :";
-                
-            case 'price_range':
-                $prices = $this->extractPriceRange($message);
-                return "Hôtels entre {$prices['min']} et {$prices['max']} {$currency} ({$count}) :";
-                
-            case 'address':
-                $address = $this->extractAddress($message);
-                if ($address === '') {
-                    return "Hôtels trouvés ({$count}) :";
-                }
-                return "Hôtels à {$address} ({$count}) :";
-                
-            case 'contact':
-                return "Hôtel(s) trouvé(s) ({$count}) :";
-                
-            default:
-                return "Liste des hôtels ({$count}) :";
+        // Extraire la zone
+        $zones = ['dakar', 'ngor', 'saly', 'mbour', 'plateau', 'almadie', 'yoff'];
+        $foundZone = null;
+        foreach ($zones as $zone) {
+            if (str_contains($message, $zone)) {
+                $foundZone = ucfirst($zone);
+                break;
+            }
         }
+        
+        if ($count === 1) {
+            if ($price) {
+                return "🎉 J'ai trouvé un hôtel à {$price} {$currency} pour vous :";
+            }
+            if ($foundZone) {
+                return "📍 Voici un hôtel situé à {$foundZone} qui pourrait vous plaire :";
+            }
+            return "🏨 Voici l'hôtel que j'ai trouvé pour vous :";
+        }
+        
+        if ($count <= 3) {
+            if ($price && str_contains($message, 'moins')) {
+                return "💰 J'ai trouvé {$count} hôtels à moins de {$price} {$currency} :";
+            }
+            if ($price && str_contains($message, 'plus')) {
+                return "💰 J'ai trouvé {$count} hôtels à plus de {$price} {$currency} :";
+            }
+            if ($foundZone) {
+                return "📍 Voici {$count} hôtels situés à {$foundZone} :";
+            }
+            return "🏨 J'ai trouvé {$count} hôtels qui correspondent à votre recherche :";
+        }
+        
+        return "🏨 J'ai trouvé {$count} hôtels qui pourraient vous intéresser. En voici quelques-uns :";
     }
     
     /**
-     * Réponse quand aucun hôtel trouvé
+     * Réponse quand aucun résultat
      */
-    private function emptyResponse(string $searchType, string $message, string $currency): JsonResponse
+    private function noResultsResponse(string $message, string $currency): JsonResponse
     {
-        $price = $this->extractPrice($message);
-        $suggestions = "";
+        preg_match('/(\d+)/', $message, $priceMatch);
+        $price = $priceMatch[1] ?? null;
         
-        switch ($searchType) {
-            case 'name':
-                $name = $this->extractHotelName($message);
-                $suggestions = "Aucun hôtel nommé \"{$name}\" n'a été trouvé.\n";
-                $suggestions .= "Essayez avec un autre nom ou tapez \"liste tous les hôtels\"";
+        $zones = ['dakar', 'ngor', 'saly', 'mbour', 'plateau', 'almadie', 'yoff'];
+        $foundZone = null;
+        foreach ($zones as $zone) {
+            if (str_contains($message, $zone)) {
+                $foundZone = ucfirst($zone);
                 break;
-                
-            case 'exact_price':
-                $suggestions = "Aucun hôtel disponible à exactement {$price} {$currency}.\n";
-                $suggestions .= "Suggestions :\n";
-                $suggestions .= "• \"moins de {$price}\"\n";
-                $suggestions .= "• \"plus de {$price}\"\n";
-                $suggestions .= "• \"entre " . max(0, $price - 5000) . " et " . ($price + 5000) . "\"";
-                break;
-                
-            case 'max_price':
-                $suggestions = "Aucun hôtel trouvé à moins de {$price} {$currency}.\n";
-                $suggestions .= "Essayez d'augmenter votre budget à " . ($price + 10000) . " {$currency}";
-                break;
-                
-            case 'min_price':
-                $suggestions = " Aucun hôtel trouvé à plus de {$price} {$currency}.\n";
-                $suggestions .= "Essayez de diminuer votre budget ou tapez \"tous les hôtels\"";
-                break;
-                
-            case 'address':
-                $address = $this->extractAddress($message);
-                $suggestions = "Aucun hôtel trouvé à \"{$address}\".\n";
-                $suggestions .= "Essayez : Dakar, Ngor, Saly, Mbour, Plateau";
-                break;
-                
-            case 'contact':
-                $suggestions = "Aucun hôtel trouvé avec ce contact.\n";
-                $suggestions .= "Vérifiez le numéro ou l'email";
-                break;
-                
-            default:
-                $suggestions = "Aucun hôtel trouvé.\n";
-                $suggestions .= "Tapez **aide** pour voir comment m'utiliser";
+            }
+        }
+        
+        if ($price && $foundZone) {
+            return response()->json([
+                'type' => 'text',
+                'reply' => "😕 Je suis désolé, je n'ai pas trouvé d'hôtel à {$foundZone} avec un budget de {$price} {$currency}. Voulez-vous que je cherche avec un budget différent ou dans un autre quartier ?"
+            ]);
+        }
+        
+        if ($price) {
+            return response()->json([
+                'type' => 'text',
+                'reply' => "😕 Désolé, aucun hôtel trouvé à {$price} {$currency}. Quel est votre budget maximum ? Je peux vous proposer des alternatives."
+            ]);
+        }
+        
+        if ($foundZone) {
+            return response()->json([
+                'type' => 'text',
+                'reply' => "📍 Je n'ai pas encore d'hôtel à {$foundZone}. Essayez Dakar, Ngor ou Saly ? Je vous trouverai quelque chose de bien !"
+            ]);
         }
         
         return response()->json([
-            'type' => 'empty',
-            'reply' => "Aucun résultat.\n\n{$suggestions}"
+            'type' => 'text',
+            'reply' => "Je n'ai pas trouvé d'hôtel correspondant. Pouvez-vous me donner plus de détails ? Votre budget, un quartier, ou le nom d'un hôtel que vous cherchez ?"
         ]);
     }
 }
