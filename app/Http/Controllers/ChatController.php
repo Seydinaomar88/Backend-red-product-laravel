@@ -43,6 +43,14 @@ class ChatController extends Controller
                 $query->where('price', '>=', $price);
             }
 
+            /* 2.5. RECHERCHE GÉNÉRIQUE "hôtels à ..." */
+            if (str_contains($message, 'hôtel') || str_contains($message, 'hotel')) {
+                // Si aucun filtre spécifique, retourne les 5 premiers
+                if ($query->getQuery()->wheres === []) {
+                    // Pas de condition = recherche libre
+                }
+            }
+
             if (str_contains($message, 'entre')) {
                 $parts = explode('et', $message);
 
@@ -56,10 +64,17 @@ class ChatController extends Controller
             }
         }
 
+
         /*3. VILLES / ZONES */
         $zones = [
-            'dakar', 'ngor', 'almadie', 'plateau',
-            'mbour', 'saly', 'lac rose', 'sine saloum'
+            'dakar',
+            'ngor',
+            'almadie',
+            'plateau',
+            'mbour',
+            'saly',
+            'lac rose',
+            'sine saloum'
         ];
 
         foreach ($zones as $zone) {
