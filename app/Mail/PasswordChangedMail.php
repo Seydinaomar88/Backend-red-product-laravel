@@ -4,29 +4,32 @@ namespace App\Mail;
 
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Content;
+use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use App\Models\User;
 
 class PasswordChangedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public $user;
+    public User $user;
 
-    public function __construct($user)
+    public function __construct(User $user)
     {
         $this->user = $user;
     }
 
-    public function envelope(): \Illuminate\Mail\Mailables\Envelope
+    public function envelope(): Envelope
     {
-        return new \Illuminate\Mail\Mailables\Envelope(
-            subject: ' Mot de passe modifié',
+        return new Envelope(
+            subject: '🔒 Votre mot de passe a été modifié',
         );
     }
 
-    public function content(): \Illuminate\Mail\Mailables\Content
+    public function content(): Content
     {
-        return new \Illuminate\Mail\Mailables\Content(
+        return new Content(
             view: 'emails.password-changed',
         );
     }
