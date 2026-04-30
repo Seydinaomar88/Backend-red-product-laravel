@@ -17,24 +17,15 @@ class ChatController extends Controller
         ]);
 
         $user = $request->user();
-        $message = $request->message;
+        $message = trim($request->message);
+        $currency = $user->currency ?? 'FCFA';
 
-        // Récupérer les hôtels
         $hotels = Hotel::where('user_id', $user->id)->get();
 
-        // Contexte hôtels
         $hotelContext = $this->buildHotelContext($hotels);
 
-        // Prompt
-        $prompt = $this->buildPrompt(
-            $message,
-            $hotelContext,
-            $user->currency ?? 'FCFA'
-        );
+        $prompt = $this->buildPrompt($message, $hotelContext, $currency);
 
-        // =========================
-        // 🔥 API GROK (xAI)
-        // =========================
         $response = Http::withHeaders([
             'Authorization' => 'Bearer ' . env('XAI_API_KEY'),
             'Content-Type' => 'application/json',
@@ -43,21 +34,26 @@ class ChatController extends Controller
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => "Tu es un assistant hôtelier intelligent au Sénégal. 
-                    Tu aides les clients à trouver des hôtels selon prix, zone, contact et distance.
-                    Réponds de façon claire, simple et professionnelle."
+                    'content' =>
+                        "Tu es un assistant hôtelier intelligent.
+
+RÈGLES IMPORTANTES :
+- Tu ne dois utiliser QUE les hôtels fournis
+- Ne jamais inventer d'hôtels
+- Si aucun hôtel ne correspond, dis 'aucun hôtel trouvé'
+- Toujours répondre clairement et simplement
+- Si prix demandé, trie les hôtels du moins cher au plus cher
+- Si demande 'moins cher', donne les 3 moins chers
+- Réponse courte, claire, professionnelle"
                 ],
                 [
                     'role' => 'user',
                     'content' => $prompt
                 ]
             ],
-            'temperature' => 0.7
+            'temperature' => 0.3, // 🔥 IMPORTANT : moins d'hallucination
         ]);
 
-        // =========================
-        // 🔥 GESTION ERREUR IA
-        // =========================
         if ($response->failed()) {
             return $this->fallbackResponse($message, $hotels);
         }
@@ -77,7 +73,7 @@ class ChatController extends Controller
     }
 
     // =========================
-    // 🧠 CONTEXTE HÔTELS
+    // 🧠 CONTEXTE HÔTELS (PROPRE)
     // =========================
     private function buildHotelContext(Collection $hotels): string
     {
@@ -85,64 +81,74 @@ class ChatController extends Controller
             return "Aucun hôtel disponible.";
         }
 
-        $text = "Liste des hôtels disponibles :\n";
+        $text = "";
 
         foreach ($hotels as $hotel) {
-            $text .= "- {$hotel->name}, {$hotel->address}, {$hotel->price} {$hotel->currency}, ";
-            $text .= "Téléphone: {$hotel->phone}, Email: {$hotel->email}\n";
+            $text .= "ID: {$hotel->id} | ";
+            $text .= "Nom: {$hotel->name} | ";
+            $text .= "Adresse: {$hotel->address} | ";
+            $text .= "Prix: {$hotel->price} FCFA | ";
+            $text .= "Tel: {$hotel->phone}\n";
         }
 
         return $text;
     }
 
     // =========================
-    // 🧠 PROMPT IA
+    // 🧠 PROMPT OPTIMISÉ
     // =========================
     private function buildPrompt(string $message, string $hotelContext, string $currency): string
     {
         return "
-Voici les hôtels disponibles :
+HÔTELS DISPONIBLES:
 {$hotelContext}
 
-Devise: {$currency}
+MONNAIE: {$currency}
 
-Question du client:
+QUESTION CLIENT:
 {$message}
 
-Instructions:
-- Réponds naturellement comme un assistant humain
-- Propose des hôtels si nécessaire
-- Si aucun résultat, propose des alternatives
-- Sois clair et professionnel
+INSTRUCTIONS:
+- Réponds uniquement avec les hôtels fournis
+- Si prix demandé → filtre correctement
+- Si 'moins cher' → trie par prix
+- Si rien trouvé → dis clairement 'aucun hôtel trouvé'
+- Réponse courte et utile
 ";
     }
 
     // =========================
-    // 🔥 FALLBACK (SANS IA)
+    // 🔥 FALLBACK FIABLE
     // =========================
     private function fallbackResponse(string $message, Collection $hotels): JsonResponse
     {
         $msg = strtolower($message);
 
-        // 🔹 LISTE DES HÔTELS
-        if (str_contains($msg, 'hotel') || str_contains($msg, 'hôtel') || str_contains($msg, 'liste')) {
+        if (str_contains($msg, 'liste') || str_contains($msg, 'hotel') || str_contains($msg, 'hôtel')) {
             return response()->json([
                 'type' => 'hotels',
-                'data' => $hotels
+                'count' => $hotels->count(),
+                'data' => $hotels->values()
             ]);
         }
 
-        // 🔹 SALUTATION
+        if (str_contains($msg, 'moins cher')) {
+            return response()->json([
+                'type' => 'hotels',
+                'data' => $hotels->sortBy('price')->take(3)->values()
+            ]);
+        }
+
         if (str_contains($msg, 'bonjour')) {
             return response()->json([
                 'type' => 'text',
-                'reply' => "👋 Bonjour ! Je peux vous aider à trouver des hôtels par prix, ville ou localisation."
+                'reply' => "👋 Bonjour ! Je peux vous aider à trouver un hôtel selon votre budget ou localisation."
             ]);
         }
 
         return response()->json([
             'type' => 'text',
-            'reply' => "🤖 Assistant indisponible pour le moment. Essayez : 'liste des hôtels'"
+            'reply' => "🤖 Je n'ai pas compris. Essayez : 'liste des hôtels' ou 'moins cher'"
         ]);
     }
 }
