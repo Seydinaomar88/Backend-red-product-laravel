@@ -7,9 +7,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Resend\Laravel\Facades\Resend;
 
 class AuthController extends Controller
 {
@@ -32,7 +32,7 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // Email de bienvenue via Resend
+        // Email de bienvenue via Gmail
         try {
             $this->sendWelcomeEmail($user);
         } catch (\Exception $e) {
@@ -262,10 +262,10 @@ class AuthController extends Controller
         ]);
     }
 
-    /* ========== MÉTHODES PRIVÉES POUR RESEND ========== */
+    /* ========== MÉTHODES PRIVÉES POUR GMAIL ========== */
 
     /**
-     * Envoi email de bienvenue via Resend
+     * Envoi email de bienvenue via Gmail
      */
     private function sendWelcomeEmail(User $user): void
     {
@@ -311,16 +311,15 @@ class AuthController extends Controller
             </html>
         ";
 
-        Resend::emails()->send([
-            'from' => env('MAIL_FROM_NAME', 'Red Product') . ' <' . env('MAIL_FROM_ADDRESS', 'onboarding@resend.dev') . '>',
-            'to' => $user->email,
-            'subject' => '🎉 Bienvenue sur Red Product',
-            'html' => $htmlContent,
-        ]);
+        Mail::send([], [], function ($message) use ($user, $htmlContent) {
+            $message->to($user->email, $user->name)
+                    ->subject('🎉 Bienvenue sur Red Product')
+                    ->html($htmlContent);
+        });
     }
 
     /**
-     * Envoi email de réinitialisation via Resend
+     * Envoi email de réinitialisation via Gmail
      */
     private function sendResetPasswordEmail(string $email, string $resetLink): void
     {
@@ -369,16 +368,15 @@ class AuthController extends Controller
             </html>
         ";
 
-        Resend::emails()->send([
-            'from' => env('MAIL_FROM_NAME', 'Red Product') . ' <' . env('MAIL_FROM_ADDRESS', 'onboarding@resend.dev') . '>',
-            'to' => $email,
-            'subject' => '🔐 Réinitialisation de votre mot de passe',
-            'html' => $htmlContent,
-        ]);
+        Mail::send([], [], function ($message) use ($email, $userName, $htmlContent) {
+            $message->to($email, $userName)
+                    ->subject('🔐 Réinitialisation de votre mot de passe')
+                    ->html($htmlContent);
+        });
     }
 
     /**
-     * Envoi email de confirmation de changement de mot de passe via Resend
+     * Envoi email de confirmation de changement de mot de passe via Gmail
      */
     private function sendPasswordChangedEmail(User $user): void
     {
@@ -427,11 +425,10 @@ class AuthController extends Controller
             </html>
         ";
 
-        Resend::emails()->send([
-            'from' => env('MAIL_FROM_NAME', 'Red Product') . ' <' . env('MAIL_FROM_ADDRESS', 'onboarding@resend.dev') . '>',
-            'to' => $user->email,
-            'subject' => '🔒 Votre mot de passe a été modifié',
-            'html' => $htmlContent,
-        ]);
+        Mail::send([], [], function ($message) use ($user, $htmlContent) {
+            $message->to($user->email, $user->name)
+                    ->subject('🔒 Votre mot de passe a été modifié')
+                    ->html($htmlContent);
+        });
     }
 }
