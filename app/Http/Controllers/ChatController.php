@@ -63,32 +63,50 @@ class ChatController extends Controller
             ];
         })->toArray();
 
-        // Construction du prompt pour Grok
+        // Construction du prompt pour Grok avec instructions précises
         $systemPrompt = "Tu es un assistant hôtelier professionnel. Tu aides les clients à trouver des hôtels.
 
 Voici la liste des hôtels disponibles (au format JSON) :
 " . json_encode($hotelsData, JSON_PRETTY_PRINT) . "
 
-Règles importantes :
-1. Réponds de manière naturelle et conviviale
-2. Si l'utilisateur cherche un hôtel par nom, prix, adresse ou contact, filtre les résultats
-3. Si plusieurs hôtels correspondent, présente-les de façon claire
-4. Si aucun hôtel ne correspond, propose des alternatives ou demande plus d'informations
-5. Utilise des emojis pour rendre la réponse plus chaleureuse
-6. Retourne une réponse au format JSON avec les clés : 'type' (text ou hotels), 'message' (le texte de réponse), et 'data' (liste des hôtels si nécessaire)
+RÈGLES TRÈS IMPORTANTES À RESPECTER ABSOLUMENT :
 
-Exemple de réponse pour des hôtels :
-{\"type\":\"hotels\",\"message\":\"Voici 2 hôtels correspondant à votre recherche :\",\"data\":[{\"id\":1,\"name\":\"Hotel Rade\"},{\"id\":2,\"name\":\"Hotel Terrou\"}]}
+1. **PRIX MOINS CHER** : Si l'utilisateur dit 'moins cher', 'pas cher', 'économique', 'budget', tu DOIS filtrer et retourner UNIQUEMENT les hôtels avec les prix les plus bas (trier par prix croissant et ne garder que les 3 premiers).
 
-Exemple de réponse texte :
-{\"type\":\"text\",\"reply\":\"Bonjour ! Comment puis-je vous aider ?\"}";
+2. **PRIX PLUS CHER** : Si l'utilisateur dit 'plus cher', 'luxe', 'haut de gamme', tu DOIS filtrer et retourner UNIQUEMENT les hôtels avec les prix les plus élevés (trier par prix décroissant et ne garder que les 3 premiers).
+
+3. **RECHERCHE PRÉCISE** : 
+   - 'à 15000' → prix EXACTEMENT 15000
+   - 'moins de 30000' → prix ≤ 30000
+   - 'plus de 50000' → prix ≥ 50000
+   - 'entre 20000 et 50000' → prix entre ces valeurs
+
+4. **PAR QUARTIER** : Si l'utilisateur donne un quartier (Dakar, Ngor, Saly...), retourne UNIQUEMENT les hôtels dans ce quartier.
+
+5. **PAR NOM** : Si l'utilisateur donne un nom d'hôtel, retourne UNIQUEMENT cet hôtel.
+
+6. **RÉPONSE JSON** : Tu dois retourner UNIQUEMENT du JSON valide, pas de texte avant ou après.
+
+Exemples de réponse JSON :
+
+Pour 'hôtel moins cher' :
+{\"type\":\"hotels\",\"message\":\"🏨 Voici les 3 hôtels les moins chers :\",\"data\":[{\"id\":5,\"name\":\"Hotel Pas Cher\",\"price\":15000},{\"id\":3,\"name\":\"Hotel Budget\",\"price\":20000},{\"id\":1,\"name\":\"Hotel Moyen\",\"price\":25000}]}
+
+Pour 'hôtel à 25000' (prix exact) :
+{\"type\":\"hotels\",\"message\":\"🏨 Hôtel trouvé à 25000 FCFA :\",\"data\":[{\"id\":2,\"name\":\"Hotel Exact\",\"price\":25000}]}
+
+Pour 'hôtel à Dakar' :
+{\"type\":\"hotels\",\"message\":\"📍 Voici les hôtels situés à Dakar :\",\"data\":[{\"id\":1,\"name\":\"Hotel Dakar\",\"address\":\"Dakar\"}]}
+
+Pour aucun résultat :
+{\"type\":\"text\",\"reply\":\"😕 Désolé, aucun hôtel ne correspond à votre recherche. Essayez avec un autre budget ou quartier.\"}";
 
         try {
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiKey,
                 'Content-Type' => 'application/json',
             ])->timeout(30)->post('https://api.x.ai/v1/chat/completions', [
-                'model' => 'grok-beta', // ou 'grok-2-latest'
+                'model' => 'grok-beta',
                 'messages' => [
                     [
                         'role' => 'system',
@@ -99,14 +117,14 @@ Exemple de réponse texte :
                         'content' => "Message utilisateur : " . $message . "\nDevise: " . $currency
                     ]
                 ],
-                'temperature' => 0.7,
+                'temperature' => 0.3,  // Plus bas pour des réponses plus précises
                 'max_tokens' => 1500,
             ]);
 
             if ($response->successful()) {
                 $content = $response->json()['choices'][0]['message']['content'];
                 
-                // Nettoyer le contenu (enlever les markdown JSON si présent)
+                // Nettoyer le contenu
                 $content = trim($content);
                 $content = preg_replace('/```json\s*|\s*```/', '', $content);
                 
@@ -118,7 +136,7 @@ Exemple de réponse texte :
                     return $this->fallbackResponse($message, $hotels, $currency);
                 }
                 
-                // Si Grok retourne des hôtels, on les enrichit avec les données complètes
+                // Si Grok retourne des hôtels, on les enrichit
                 if (isset($result['type']) && $result['type'] === 'hotels' && isset($result['data'])) {
                     $enrichedHotels = [];
                     foreach ($result['data'] as $hotelData) {
@@ -157,64 +175,142 @@ Exemple de réponse texte :
     }
 
     /**
-     * Réponse de secours en cas d'échec de l'API Grok
+     * Réponse de secours avec recherches PRÉCISES (sans IA)
      */
     private function fallbackResponse(string $message, Collection $hotels, string $currency): array
     {
         $searchTerm = strtolower($message);
+        $filteredHotels = $hotels;
+        $sortDirection = null; // 'asc' pour moins cher, 'desc' pour plus cher
         
-        // Extraction des prix
+        // === DÉTECTION "MOINS CHER" ===
+        if (str_contains($searchTerm, 'moins cher') || 
+            str_contains($searchTerm, 'pas cher') || 
+            str_contains($searchTerm, 'économique') ||
+            str_contains($searchTerm, 'budget') ||
+            str_contains($searchTerm, 'le moins cher')) {
+            $filteredHotels = $hotels->sortBy('price');
+            $sortDirection = 'asc';
+            // Limiter aux 3 moins chers
+            $filteredHotels = $filteredHotels->take(3);
+            $messagePrefix = "🏨 Voici les {$filteredHotels->count()} hôtels les moins chers :";
+        }
+        
+        // === DÉTECTION "PLUS CHER" ===
+        elseif (str_contains($searchTerm, 'plus cher') || 
+                str_contains($searchTerm, 'luxe') || 
+                str_contains($searchTerm, 'haut de gamme') ||
+                str_contains($searchTerm, 'le plus cher')) {
+            $filteredHotels = $hotels->sortByDesc('price');
+            $sortDirection = 'desc';
+            // Limiter aux 3 plus chers
+            $filteredHotels = $filteredHotels->take(3);
+            $messagePrefix = "🏨 Voici les {$filteredHotels->count()} hôtels les plus chers :";
+        }
+        
+        // === EXTRACTION DES PRIX ===
         preg_match_all('/(\d+)/', $message, $priceMatches);
         $prices = $priceMatches[0] ?? [];
         
-        $filteredHotels = $hotels;
-        
-        // Filtrage par prix
-        if (!empty($prices)) {
-            if (str_contains($message, 'moins') || str_contains($message, 'max')) {
-                $filteredHotels = $filteredHotels->where('price', '<=', (int)$prices[0]);
-            } elseif (str_contains($message, 'plus') || str_contains($message, 'min')) {
-                $filteredHotels = $filteredHotels->where('price', '>=', (int)$prices[0]);
-            } elseif (str_contains($message, 'entre') && count($prices) >= 2) {
-                $filteredHotels = $filteredHotels->whereBetween('price', [(int)$prices[0], (int)$prices[1]]);
-            } else {
-                $filteredHotels = $filteredHotels->where('price', (int)$prices[0]);
+        if (!empty($prices) && !$sortDirection) {
+            // Prix exact (ex: "hôtel à 15000")
+            if (str_contains($message, ' à ') || str_contains($message, ' exact')) {
+                $filteredHotels = $hotels->where('price', (int)$prices[0]);
+                $messagePrefix = "🏨 Hôtel(s) à exactement {$prices[0]} {$currency} :";
+            }
+            // Moins de X
+            elseif (str_contains($message, 'moins') || str_contains($message, 'max') || str_contains($message, '<')) {
+                $filteredHotels = $hotels->where('price', '<=', (int)$prices[0]);
+                $messagePrefix = "🏨 Hôtels à moins de {$prices[0]} {$currency} :";
+            }
+            // Plus de X
+            elseif (str_contains($message, 'plus') || str_contains($message, 'min') || str_contains($message, '>')) {
+                $filteredHotels = $hotels->where('price', '>=', (int)$prices[0]);
+                $messagePrefix = "🏨 Hôtels à plus de {$prices[0]} {$currency} :";
+            }
+            // Entre X et Y
+            elseif (str_contains($message, 'entre') && count($prices) >= 2) {
+                $filteredHotels = $hotels->whereBetween('price', [(int)$prices[0], (int)$prices[1]]);
+                $messagePrefix = "🏨 Hôtels entre {$prices[0]} et {$prices[1]} {$currency} :";
+            }
+            // Simple chiffre
+            elseif (count($prices) == 1) {
+                $filteredHotels = $hotels->where('price', (int)$prices[0]);
+                $messagePrefix = "🏨 Hôtel(s) à {$prices[0]} {$currency} :";
             }
         }
         
-        // Filtrage par zone
-        $zones = ['dakar', 'ngor', 'almadie', 'plateau', 'yoff', 'saly', 'mbour'];
-        foreach ($zones as $zone) {
-            if (str_contains($searchTerm, $zone)) {
-                $filteredHotels = $filteredHotels->filter(function ($hotel) use ($zone) {
-                    return str_contains(strtolower($hotel->address), $zone);
-                });
-                break;
+        // === FILTRAGE PAR ZONE (si pas déjà filtré) ===
+        if (!$sortDirection && $filteredHotels == $hotels) {
+            $zones = [
+                'dakar' => 'Dakar', 'ngor' => 'Ngor', 'almadie' => 'Almadies',
+                'plateau' => 'Plateau', 'yoff' => 'Yoff', 'ouakam' => 'Ouakam',
+                'mermoz' => 'Mermoz', 'saly' => 'Saly', 'mbour' => 'Mbour',
+                'la somone' => 'La Somone', 'lac rose' => 'Lac Rose'
+            ];
+            
+            foreach ($zones as $zoneKey => $zoneName) {
+                if (str_contains($searchTerm, $zoneKey)) {
+                    $filteredHotels = $hotels->filter(function ($hotel) use ($zoneName) {
+                        return str_contains(strtolower($hotel->address), strtolower($zoneName));
+                    });
+                    $messagePrefix = "📍 Hôtels situés à {$zoneName} :";
+                    break;
+                }
             }
         }
         
-        // Filtrage par nom
-        $hotelNames = ['rade', 'terrou', 'radisson', 'king fahd', 'pullman'];
-        foreach ($hotelNames as $name) {
-            if (str_contains($searchTerm, $name)) {
-                $filteredHotels = $filteredHotels->filter(function ($hotel) use ($name) {
-                    return str_contains(strtolower($hotel->name), $name);
-                });
-                break;
+        // === FILTRAGE PAR NOM ===
+        if (!$sortDirection && $filteredHotels == $hotels) {
+            $hotelNames = ['rade', 'terrou', 'radisson', 'king fahd', 'pullman', 'meridien'];
+            foreach ($hotelNames as $name) {
+                if (str_contains($searchTerm, $name)) {
+                    $filteredHotels = $hotels->filter(function ($hotel) use ($name) {
+                        return str_contains(strtolower($hotel->name), $name);
+                    });
+                    $messagePrefix = "🏨 Hôtel(s) correspondant à votre recherche :";
+                    break;
+                }
             }
         }
         
+        // === SI AUCUN FILTRE N'A ÉTÉ APPLIQUÉ ===
+        if ($filteredHotels == $hotels) {
+            return [
+                'type' => 'text',
+                'reply' => "🔍 Je peux vous aider à trouver des hôtels !\n\n" .
+                           "Essayez :\n" .
+                           "• 'hôtel moins cher' - pour les meilleurs prix\n" .
+                           "• 'hôtel à 25000' - prix exact\n" .
+                           "• 'moins de 30000' - budget max\n" .
+                           "• 'hôtel à Dakar' - par quartier\n" .
+                           "• 'entre 20000 et 50000' - fourchette de prix"
+            ];
+        }
+        
+        // === RÉSULTATS ===
         if ($filteredHotels->isEmpty()) {
             return [
                 'type' => 'text',
-                'reply' => "🔍 Je ne trouve pas d'hôtel correspondant à votre recherche. Pouvez-vous me donner plus de détails (nom, quartier, budget) ?"
+                'reply' => "😕 Désolé, aucun hôtel ne correspond à votre recherche.\n\n" .
+                           "Propositions :\n" .
+                           "• Essayez un budget différent\n" .
+                           "• Essayez un autre quartier\n" .
+                           "• Tapez 'hôtel moins cher' pour voir les meilleurs prix"
             ];
+        }
+        
+        // Trier par prix si demandé
+        if ($sortDirection === 'asc') {
+            $filteredHotels = $filteredHotels->sortBy('price');
+        } elseif ($sortDirection === 'desc') {
+            $filteredHotels = $filteredHotels->sortByDesc('price');
         }
         
         return [
             'type' => 'hotels',
             'count' => $filteredHotels->count(),
-            'message' => "🏨 Voici les hôtels trouvés :",
+            'message' => $messagePrefix ?? "🏨 Voici les hôtels trouvés :",
             'data' => $filteredHotels->map(function ($hotel) {
                 return [
                     'id' => $hotel->id,
