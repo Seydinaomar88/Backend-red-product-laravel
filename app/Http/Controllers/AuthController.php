@@ -337,13 +337,13 @@ class AuthController extends Controller
             <body>
                 <div class='container'>
                     <div class='header'>
-                        <h2>🎉 Bienvenue sur Red Product !</h2>
+                        <h2>Bienvenue sur Red Product !</h2>
                     </div>
                     <div class='content'>
                         <p>Bonjour <strong>{$user->name}</strong>,</p>
                         <p>Merci d'avoir rejoint <strong>Red Product</strong> ! Nous sommes ravis de vous compter parmi nos utilisateurs.</p>
                         <div style='text-align: center;'>
-                            <a href='{$frontendUrl}/dashboard' class='button'>🚀 Accéder à mon espace</a>
+                            <a href='{$frontendUrl}/dashboard' class='button'>Accéder à mon espace</a>
                         </div>
                         <hr>
                         <p><strong>Besoin d'aide ?</strong></p>
@@ -357,7 +357,7 @@ class AuthController extends Controller
             </html>
         ";
 
-        $this->sendBrevoEmail($user->email, $user->name, '🎉 Bienvenue sur Red Product', $htmlContent);
+        $this->sendBrevoEmail($user->email, $user->name, 'Bienvenue sur Red Product', $htmlContent);
     }
 
     /**
@@ -389,7 +389,7 @@ class AuthController extends Controller
             <body>
                 <div class='container'>
                     <div class='header'>
-                        <h2>🔐 Réinitialisation du mot de passe</h2>
+                        <h2>Réinitialisation du mot de passe</h2>
                     </div>
                     <div class='content'>
                         <p>Bonjour {$userName},</p>
@@ -398,7 +398,7 @@ class AuthController extends Controller
                             <a href='{$resetLink}' class='button'>🔄 Réinitialiser mon mot de passe</a>
                         </div>
                         <div class='alert'>
-                            ⏰ Ce lien expire dans <strong>60 minutes</strong>.
+                            Ce lien expire dans <strong>60 minutes</strong>.
                         </div>
                         <p>Si vous n'avez pas demandé cette réinitialisation, ignorez simplement cet email.</p>
                     </div>
@@ -410,7 +410,7 @@ class AuthController extends Controller
             </html>
         ";
 
-        $this->sendBrevoEmail($email, $userName, '🔐 Réinitialisation de votre mot de passe', $htmlContent);
+        $this->sendBrevoEmail($email, $userName, 'Réinitialisation de votre mot de passe', $htmlContent);
     }
 
     /**
@@ -442,16 +442,16 @@ class AuthController extends Controller
             <body>
                 <div class='container'>
                     <div class='header'>
-                        <h2>✅ Mot de passe modifié</h2>
+                        <h2>Mot de passe modifié</h2>
                     </div>
                     <div class='content'>
                         <p>Bonjour {$user->name},</p>
                         <div class='alert'>
-                            ⚠️ Votre mot de passe a été modifié avec succès.
+                            Votre mot de passe a été modifié avec succès.
                         </div>
                         <p>Si vous n'êtes pas à l'origine de cette modification, contactez-nous immédiatement.</p>
                         <div style='text-align: center; margin-top: 30px;'>
-                            <a href='{$loginUrl}' class='button'>🔑 Me connecter</a>
+                            <a href='{$loginUrl}' class='button'>Me connecter</a>
                         </div>
                     </div>
                     <div class='footer'>
@@ -463,6 +463,6 @@ class AuthController extends Controller
             </html>
         ";
 
-        $this->sendBrevoEmail($user->email, $user->name, '🔒 Votre mot de passe a été modifié', $htmlContent);
+        $this->sendBrevoEmail($user->email, $user->name, 'Votre mot de passe a été modifié', $htmlContent);
     }
 }
