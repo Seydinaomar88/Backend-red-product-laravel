@@ -65,7 +65,7 @@ class ChatController extends Controller
 
         // Construction du prompt pour Grok
         $systemPrompt = "Tu es un assistant hôtelier professionnel. Tu aides les clients à trouver des hôtels.
-        
+
 Voici la liste des hôtels disponibles (au format JSON) :
 " . json_encode($hotelsData, JSON_PRETTY_PRINT) . "
 
@@ -75,14 +75,20 @@ Règles importantes :
 3. Si plusieurs hôtels correspondent, présente-les de façon claire
 4. Si aucun hôtel ne correspond, propose des alternatives ou demande plus d'informations
 5. Utilise des emojis pour rendre la réponse plus chaleureuse
-6. Retourne une réponse au format JSON avec les clés : 'type' (text ou hotels), 'message' (le texte de réponse), et 'data' (liste des hôtels si nécessaire)";
+6. Retourne une réponse au format JSON avec les clés : 'type' (text ou hotels), 'message' (le texte de réponse), et 'data' (liste des hôtels si nécessaire)
+
+Exemple de réponse pour des hôtels :
+{\"type\":\"hotels\",\"message\":\"Voici 2 hôtels correspondant à votre recherche :\",\"data\":[{\"id\":1,\"name\":\"Hotel Rade\"},{\"id\":2,\"name\":\"Hotel Terrou\"}]}
+
+Exemple de réponse texte :
+{\"type\":\"text\",\"reply\":\"Bonjour ! Comment puis-je vous aider ?\"}";
 
         try {
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiKey,
                 'Content-Type' => 'application/json',
             ])->timeout(30)->post('https://api.x.ai/v1/chat/completions', [
-                'model' => 'grok-beta',
+                'model' => 'grok-beta', // ou 'grok-2-latest'
                 'messages' => [
                     [
                         'role' => 'system',
@@ -94,13 +100,23 @@ Règles importantes :
                     ]
                 ],
                 'temperature' => 0.7,
-                'max_tokens' => 1000,
-                'response_format' => ['type' => 'json_object']
+                'max_tokens' => 1500,
             ]);
 
             if ($response->successful()) {
                 $content = $response->json()['choices'][0]['message']['content'];
+                
+                // Nettoyer le contenu (enlever les markdown JSON si présent)
+                $content = trim($content);
+                $content = preg_replace('/```json\s*|\s*```/', '', $content);
+                
                 $result = json_decode($content, true);
+                
+                // Vérifier si le JSON est valide
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    Log::error('Invalid JSON from Grok', ['content' => $content]);
+                    return $this->fallbackResponse($message, $hotels, $currency);
+                }
                 
                 // Si Grok retourne des hôtels, on les enrichit avec les données complètes
                 if (isset($result['type']) && $result['type'] === 'hotels' && isset($result['data'])) {
@@ -121,6 +137,7 @@ Règles importantes :
                         }
                     }
                     $result['data'] = $enrichedHotels;
+                    $result['count'] = count($enrichedHotels);
                 }
                 
                 Log::info('Grok API appelée avec succès', ['message' => $message]);
@@ -144,13 +161,48 @@ Règles importantes :
      */
     private function fallbackResponse(string $message, Collection $hotels, string $currency): array
     {
-        // Logique de recherche simple en secours
         $searchTerm = strtolower($message);
         
-        $filteredHotels = $hotels->filter(function ($hotel) use ($searchTerm) {
-            return str_contains(strtolower($hotel->name), $searchTerm) ||
-                   str_contains(strtolower($hotel->address), $searchTerm);
-        });
+        // Extraction des prix
+        preg_match_all('/(\d+)/', $message, $priceMatches);
+        $prices = $priceMatches[0] ?? [];
+        
+        $filteredHotels = $hotels;
+        
+        // Filtrage par prix
+        if (!empty($prices)) {
+            if (str_contains($message, 'moins') || str_contains($message, 'max')) {
+                $filteredHotels = $filteredHotels->where('price', '<=', (int)$prices[0]);
+            } elseif (str_contains($message, 'plus') || str_contains($message, 'min')) {
+                $filteredHotels = $filteredHotels->where('price', '>=', (int)$prices[0]);
+            } elseif (str_contains($message, 'entre') && count($prices) >= 2) {
+                $filteredHotels = $filteredHotels->whereBetween('price', [(int)$prices[0], (int)$prices[1]]);
+            } else {
+                $filteredHotels = $filteredHotels->where('price', (int)$prices[0]);
+            }
+        }
+        
+        // Filtrage par zone
+        $zones = ['dakar', 'ngor', 'almadie', 'plateau', 'yoff', 'saly', 'mbour'];
+        foreach ($zones as $zone) {
+            if (str_contains($searchTerm, $zone)) {
+                $filteredHotels = $filteredHotels->filter(function ($hotel) use ($zone) {
+                    return str_contains(strtolower($hotel->address), $zone);
+                });
+                break;
+            }
+        }
+        
+        // Filtrage par nom
+        $hotelNames = ['rade', 'terrou', 'radisson', 'king fahd', 'pullman'];
+        foreach ($hotelNames as $name) {
+            if (str_contains($searchTerm, $name)) {
+                $filteredHotels = $filteredHotels->filter(function ($hotel) use ($name) {
+                    return str_contains(strtolower($hotel->name), $name);
+                });
+                break;
+            }
+        }
         
         if ($filteredHotels->isEmpty()) {
             return [
@@ -162,7 +214,7 @@ Règles importantes :
         return [
             'type' => 'hotels',
             'count' => $filteredHotels->count(),
-            'message' => "Voici les hôtels trouvés :",
+            'message' => "🏨 Voici les hôtels trouvés :",
             'data' => $filteredHotels->map(function ($hotel) {
                 return [
                     'id' => $hotel->id,
