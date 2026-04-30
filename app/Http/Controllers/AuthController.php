@@ -7,9 +7,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Http;
 
 class AuthController extends Controller
 {
@@ -32,7 +32,7 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // Email de bienvenue via Gmail
+        // Email de bienvenue via Brevo API
         try {
             $this->sendWelcomeEmail($user);
         } catch (\Exception $e) {
@@ -262,10 +262,56 @@ class AuthController extends Controller
         ]);
     }
 
-    /* ========== MÉTHODES PRIVÉES POUR GMAIL ========== */
+    /* ========== MÉTHODES PRIVÉES POUR BREVO API ========== */
 
     /**
-     * Envoi email de bienvenue via Gmail
+     * Envoi email via API Brevo
+     */
+    private function sendBrevoEmail(string $to, string $toName, string $subject, string $htmlContent): bool
+    {
+        $apiKey = env('BREVO_API_KEY');
+        
+        if (!$apiKey) {
+            Log::error('BREVO_API_KEY non configurée');
+            return false;
+        }
+        
+        try {
+            $response = Http::withHeaders([
+                'accept' => 'application/json',
+                'api-key' => $apiKey,
+                'content-type' => 'application/json'
+            ])->timeout(30)->post('https://api.brevo.com/v3/smtp/email', [
+                'sender' => [
+                    'name' => env('MAIL_FROM_NAME', 'Red Product'),
+                    'email' => env('MAIL_FROM_ADDRESS', 'zo33930@gmail.com')
+                ],
+                'to' => [
+                    ['email' => $to, 'name' => $toName]
+                ],
+                'subject' => $subject,
+                'htmlContent' => $htmlContent
+            ]);
+            
+            if ($response->successful()) {
+                Log::info('Email envoyé via Brevo', ['to' => $to, 'subject' => $subject]);
+                return true;
+            }
+            
+            Log::error('Erreur Brevo API', [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error('Exception Brevo API', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Envoi email de bienvenue via Brevo
      */
     private function sendWelcomeEmail(User $user): void
     {
@@ -311,15 +357,11 @@ class AuthController extends Controller
             </html>
         ";
 
-        Mail::send([], [], function ($message) use ($user, $htmlContent) {
-            $message->to($user->email, $user->name)
-                    ->subject('🎉 Bienvenue sur Red Product')
-                    ->html($htmlContent);
-        });
+        $this->sendBrevoEmail($user->email, $user->name, '🎉 Bienvenue sur Red Product', $htmlContent);
     }
 
     /**
-     * Envoi email de réinitialisation via Gmail
+     * Envoi email de réinitialisation via Brevo
      */
     private function sendResetPasswordEmail(string $email, string $resetLink): void
     {
@@ -368,15 +410,11 @@ class AuthController extends Controller
             </html>
         ";
 
-        Mail::send([], [], function ($message) use ($email, $userName, $htmlContent) {
-            $message->to($email, $userName)
-                    ->subject('🔐 Réinitialisation de votre mot de passe')
-                    ->html($htmlContent);
-        });
+        $this->sendBrevoEmail($email, $userName, '🔐 Réinitialisation de votre mot de passe', $htmlContent);
     }
 
     /**
-     * Envoi email de confirmation de changement de mot de passe via Gmail
+     * Envoi email de confirmation de changement de mot de passe via Brevo
      */
     private function sendPasswordChangedEmail(User $user): void
     {
@@ -425,10 +463,6 @@ class AuthController extends Controller
             </html>
         ";
 
-        Mail::send([], [], function ($message) use ($user, $htmlContent) {
-            $message->to($user->email, $user->name)
-                    ->subject('🔒 Votre mot de passe a été modifié')
-                    ->html($htmlContent);
-        });
+        $this->sendBrevoEmail($user->email, $user->name, '🔒 Votre mot de passe a été modifié', $htmlContent);
     }
 }
