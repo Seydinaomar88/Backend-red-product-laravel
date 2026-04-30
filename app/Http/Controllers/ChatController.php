@@ -22,9 +22,20 @@ class ChatController extends Controller
 
         $hotels = Hotel::where('user_id', $user->id)->get();
 
-        $hotelContext = $this->buildHotelContext($hotels);
+        // 🔥 1. ON DÉTECTE L'INTENTION AVANT GROK
+        $filteredHotels = $this->filterHotels($hotels, $message);
 
-        $prompt = $this->buildPrompt($message, $hotelContext, $currency);
+        // 🔥 2. SI DEMANDE SIMPLE → PAS BESOIN D'IA
+        if ($this->isSimpleRequest($message)) {
+            return response()->json([
+                'type' => 'hotels',
+                'count' => $filteredHotels->count(),
+                'data' => $filteredHotels->values()
+            ]);
+        }
+
+        // 🔥 3. ON ENVOIE À GROK UNIQUEMENT POUR EXPLICATION HUMAINISÉE
+        $hotelText = $this->formatForAI($filteredHotels);
 
         $response = Http::withHeaders([
             'Authorization' => 'Bearer ' . env('XAI_API_KEY'),
@@ -35,120 +46,89 @@ class ChatController extends Controller
                 [
                     'role' => 'system',
                     'content' =>
-                        "Tu es un assistant hôtelier intelligent.
-
-RÈGLES IMPORTANTES :
-- Tu ne dois utiliser QUE les hôtels fournis
-- Ne jamais inventer d'hôtels
-- Si aucun hôtel ne correspond, dis 'aucun hôtel trouvé'
-- Toujours répondre clairement et simplement
-- Si prix demandé, trie les hôtels du moins cher au plus cher
-- Si demande 'moins cher', donne les 3 moins chers
-- Réponse courte, claire, professionnelle"
+                        "Tu es un assistant hôtelier.
+                        Tu expliques les résultats de façon simple et humaine.
+                        Tu ne dois JAMAIS inventer d'hôtels."
                 ],
                 [
                     'role' => 'user',
-                    'content' => $prompt
+                    'content' =>
+                        "QUESTION: {$message}
+                        
+RESULTATS TROUVÉS:
+{$hotelText}
+
+Explique simplement les résultats."
                 ]
             ],
-            'temperature' => 0.3, // 🔥 IMPORTANT : moins d'hallucination
+            'temperature' => 0.3,
         ]);
-
-        if ($response->failed()) {
-            return $this->fallbackResponse($message, $hotels);
-        }
 
         $data = $response->json();
 
-        $reply = $data['choices'][0]['message']['content'] ?? null;
-
-        if (!$reply) {
-            return $this->fallbackResponse($message, $hotels);
-        }
+        $reply = $data['choices'][0]['message']['content']
+            ?? "Voici les hôtels disponibles.";
 
         return response()->json([
             'type' => 'text',
-            'reply' => $reply
+            'reply' => $reply,
+            'data' => $filteredHotels->values()
         ]);
     }
 
     // =========================
-    // 🧠 CONTEXTE HÔTELS (PROPRE)
+    // 🔥 FILTRAGE BACKEND (IMPORTANT)
     // =========================
-    private function buildHotelContext(Collection $hotels): string
+    private function filterHotels(Collection $hotels, string $message): Collection
+    {
+        $msg = strtolower($message);
+
+        // 🔹 MOINS CHER
+        if (str_contains($msg, 'moins cher')) {
+            return $hotels->sortBy('price')->take(3);
+        }
+
+        // 🔹 PLUS CHER
+        if (str_contains($msg, 'plus cher')) {
+            return $hotels->sortByDesc('price')->take(3);
+        }
+
+        // 🔹 PRIX EXACT
+        if (preg_match('/(\d+)/', $msg, $m)) {
+            $price = (int) $m[1];
+            return $hotels->where('price', $price);
+        }
+
+        return $hotels;
+    }
+
+    // =========================
+    // 🔥 DÉTECTION SIMPLE
+    // =========================
+    private function isSimpleRequest(string $message): bool
+    {
+        $msg = strtolower($message);
+
+        return str_contains($msg, 'liste')
+            || str_contains($msg, 'tous')
+            || str_contains($msg, 'moins cher');
+    }
+
+    // =========================
+    // 🔥 FORMAT POUR GROK
+    // =========================
+    private function formatForAI(Collection $hotels): string
     {
         if ($hotels->isEmpty()) {
-            return "Aucun hôtel disponible.";
+            return "Aucun hôtel trouvé.";
         }
 
         $text = "";
 
-        foreach ($hotels as $hotel) {
-            $text .= "ID: {$hotel->id} | ";
-            $text .= "Nom: {$hotel->name} | ";
-            $text .= "Adresse: {$hotel->address} | ";
-            $text .= "Prix: {$hotel->price} FCFA | ";
-            $text .= "Tel: {$hotel->phone}\n";
+        foreach ($hotels as $h) {
+            $text .= "- {$h->name}, {$h->price} FCFA, {$h->address}\n";
         }
 
         return $text;
-    }
-
-    // =========================
-    // 🧠 PROMPT OPTIMISÉ
-    // =========================
-    private function buildPrompt(string $message, string $hotelContext, string $currency): string
-    {
-        return "
-HÔTELS DISPONIBLES:
-{$hotelContext}
-
-MONNAIE: {$currency}
-
-QUESTION CLIENT:
-{$message}
-
-INSTRUCTIONS:
-- Réponds uniquement avec les hôtels fournis
-- Si prix demandé → filtre correctement
-- Si 'moins cher' → trie par prix
-- Si rien trouvé → dis clairement 'aucun hôtel trouvé'
-- Réponse courte et utile
-";
-    }
-
-    // =========================
-    // 🔥 FALLBACK FIABLE
-    // =========================
-    private function fallbackResponse(string $message, Collection $hotels): JsonResponse
-    {
-        $msg = strtolower($message);
-
-        if (str_contains($msg, 'liste') || str_contains($msg, 'hotel') || str_contains($msg, 'hôtel')) {
-            return response()->json([
-                'type' => 'hotels',
-                'count' => $hotels->count(),
-                'data' => $hotels->values()
-            ]);
-        }
-
-        if (str_contains($msg, 'moins cher')) {
-            return response()->json([
-                'type' => 'hotels',
-                'data' => $hotels->sortBy('price')->take(3)->values()
-            ]);
-        }
-
-        if (str_contains($msg, 'bonjour')) {
-            return response()->json([
-                'type' => 'text',
-                'reply' => "👋 Bonjour ! Je peux vous aider à trouver un hôtel selon votre budget ou localisation."
-            ]);
-        }
-
-        return response()->json([
-            'type' => 'text',
-            'reply' => "🤖 Je n'ai pas compris. Essayez : 'liste des hôtels' ou 'moins cher'"
-        ]);
     }
 }
