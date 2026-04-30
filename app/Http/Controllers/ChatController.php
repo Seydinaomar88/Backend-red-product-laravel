@@ -7,11 +7,13 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use App\Models\Hotel;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
 {
     /**
-     * Point d'entrée principal du chat - Assistant naturel
+     * Point d'entrée principal du chat - Assistant IA avec Grok
      */
     public function chat(Request $request): JsonResponse
     {
@@ -22,209 +24,146 @@ class ChatController extends Controller
             'longitude' => 'nullable|numeric',
         ]);
 
-        $message = strtolower($request->message);
+        $message = $request->message;
         $userId = $request->user()->id;
         $userCurrency = $request->user()->currency ?? 'FCFA';
 
-        /** @var Builder $query */
-        $query = Hotel::where('user_id', $userId);
-        
-        // Traitement de la demande comme un vrai assistant
-        $result = $this->processNaturalQuery($message, $query, $userCurrency);
-        
-        return $result;
+        // Récupérer les hôtels de l'utilisateur
+        $hotels = Hotel::where('user_id', $userId)->get();
+
+        // Appeler l'API Grok pour analyser la demande
+        $grokResponse = $this->callGrokAPI($message, $hotels, $userCurrency);
+
+        return response()->json($grokResponse);
     }
-    
+
     /**
-     * Traite la requête de manière naturelle
+     * Appel à l'API Grok (xAI)
      */
-    private function processNaturalQuery(string $message, Builder $query, string $userCurrency): JsonResponse
+    private function callGrokAPI(string $message, Collection $hotels, string $currency): array
     {
-        // 1. Vérifier les salutations
-        if ($this->isGreeting($message)) {
-            return $this->naturalGreeting();
+        $apiKey = env('XAI_API_KEY');
+        
+        if (!$apiKey) {
+            Log::error('XAI_API_KEY manquante');
+            return $this->fallbackResponse($message, $hotels, $currency);
         }
+
+        // Formater les données des hôtels pour Grok
+        $hotelsData = $hotels->map(function ($hotel) {
+            return [
+                'id' => $hotel->id,
+                'name' => $hotel->name,
+                'address' => $hotel->address,
+                'price' => $hotel->price,
+                'currency' => $hotel->currency,
+                'description' => $hotel->description ?? '',
+                'phone' => $hotel->phone ?? '',
+                'email' => $hotel->email ?? '',
+            ];
+        })->toArray();
+
+        // Construction du prompt pour Grok
+        $systemPrompt = "Tu es un assistant hôtelier professionnel. Tu aides les clients à trouver des hôtels.
         
-        // 2. Remerciements
-        if ($this->isThankYou($message)) {
-            return $this->thankYouResponse();
-        }
-        
-        // 3. Extraire l'intention de la phrase
-        $intent = $this->extractIntent($message);
-        
-        // 4. Appliquer les filtres en fonction de l'intention
-        $hasFilter = $this->applyNaturalFilters($message, $query);
-        
-        // 5. Exécuter la recherche
-        /** @var Collection $hotels */
-        $hotels = $query->limit(10)->get();
-        
-        // 6. Répondre de manière naturelle
-        return $this->naturalResponse($hotels, $message, $userCurrency, $intent);
-    }
-    
-    /**
-     * Vérifie si c'est une salutation
-     */
-    private function isGreeting(string $message): bool
-    {
-        $greetings = ['bonjour', 'salut', 'coucou', 'hello', 'hi', 'hey', 'bonsoir', 'bonsoir'];
-        foreach ($greetings as $greeting) {
-            if (str_contains($message, $greeting)) {
-                return true;
+Voici la liste des hôtels disponibles (au format JSON) :
+" . json_encode($hotelsData, JSON_PRETTY_PRINT) . "
+
+Règles importantes :
+1. Réponds de manière naturelle et conviviale
+2. Si l'utilisateur cherche un hôtel par nom, prix, adresse ou contact, filtre les résultats
+3. Si plusieurs hôtels correspondent, présente-les de façon claire
+4. Si aucun hôtel ne correspond, propose des alternatives ou demande plus d'informations
+5. Utilise des emojis pour rendre la réponse plus chaleureuse
+6. Retourne une réponse au format JSON avec les clés : 'type' (text ou hotels), 'message' (le texte de réponse), et 'data' (liste des hôtels si nécessaire)";
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout(30)->post('https://api.x.ai/v1/chat/completions', [
+                'model' => 'grok-beta',
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => $systemPrompt
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => "Message utilisateur : " . $message . "\nDevise: " . $currency
+                    ]
+                ],
+                'temperature' => 0.7,
+                'max_tokens' => 1000,
+                'response_format' => ['type' => 'json_object']
+            ]);
+
+            if ($response->successful()) {
+                $content = $response->json()['choices'][0]['message']['content'];
+                $result = json_decode($content, true);
+                
+                // Si Grok retourne des hôtels, on les enrichit avec les données complètes
+                if (isset($result['type']) && $result['type'] === 'hotels' && isset($result['data'])) {
+                    $enrichedHotels = [];
+                    foreach ($result['data'] as $hotelData) {
+                        $hotel = $hotels->firstWhere('id', $hotelData['id']);
+                        if ($hotel) {
+                            $enrichedHotels[] = [
+                                'id' => $hotel->id,
+                                'name' => $hotel->name,
+                                'address' => $hotel->address,
+                                'price' => $hotel->price,
+                                'currency' => $hotel->currency,
+                                'image' => $hotel->image,
+                                'phone' => $hotel->phone ?? 'Non renseigné',
+                                'email' => $hotel->email ?? 'Non renseigné',
+                            ];
+                        }
+                    }
+                    $result['data'] = $enrichedHotels;
+                }
+                
+                Log::info('Grok API appelée avec succès', ['message' => $message]);
+                return $result;
             }
+            
+            Log::error('Erreur Grok API', [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
+            return $this->fallbackResponse($message, $hotels, $currency);
+            
+        } catch (\Exception $e) {
+            Log::error('Exception Grok API: ' . $e->getMessage());
+            return $this->fallbackResponse($message, $hotels, $currency);
         }
-        return false;
     }
-    
+
     /**
-     * Vérifie si c'est un remerciement
+     * Réponse de secours en cas d'échec de l'API Grok
      */
-    private function isThankYou(string $message): bool
+    private function fallbackResponse(string $message, Collection $hotels, string $currency): array
     {
-        $thanks = ['merci', 'thanks', 'thank you', 'super', 'génial', 'parfait'];
-        foreach ($thanks as $thank) {
-            if (str_contains($message, $thank)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
-     * Extrait l'intention de la phrase
-     */
-    private function extractIntent(string $message): string
-    {
-        if (str_contains($message, 'prix') || str_contains($message, 'coûte') || str_contains($message, 'tarif')) {
-            return 'price_query';
-        }
-        if (str_contains($message, 'où') || str_contains($message, 'situé') || str_contains($message, 'adresse')) {
-            return 'location_query';
-        }
-        if (str_contains($message, 'contact') || str_contains($message, 'téléphone') || str_contains($message, 'appeler')) {
-            return 'contact_query';
-        }
-        if (str_contains($message, 'disponible') || str_contains($message, 'libre')) {
-            return 'availability_query';
-        }
-        return 'general_query';
-    }
-    
-    /**
-     * Applique les filtres de manière naturelle
-     */
-    private function applyNaturalFilters(string $message, Builder $query): bool
-    {
-        $hasFilter = false;
+        // Logique de recherche simple en secours
+        $searchTerm = strtolower($message);
         
-        // Extraction des prix
-        preg_match_all('/(\d+)/', $message, $priceMatches);
-        $prices = $priceMatches[0] ?? [];
+        $filteredHotels = $hotels->filter(function ($hotel) use ($searchTerm) {
+            return str_contains(strtolower($hotel->name), $searchTerm) ||
+                   str_contains(strtolower($hotel->address), $searchTerm);
+        });
         
-        // Prix exact (ex: "un hôtel à 25000")
-        if (str_contains($message, ' à ') && !empty($prices)) {
-            $query->where('price', (int)$prices[0]);
-            $hasFilter = true;
-        }
-        // Moins de X (ex: "moins de 30000" ou "max 30000")
-        elseif ((str_contains($message, 'moins') || str_contains($message, 'max')) && !empty($prices)) {
-            $query->where('price', '<=', (int)$prices[0]);
-            $hasFilter = true;
-        }
-        // Plus de X (ex: "plus de 50000" ou "min 50000")
-        elseif ((str_contains($message, 'plus') || str_contains($message, 'min')) && !empty($prices)) {
-            $query->where('price', '>=', (int)$prices[0]);
-            $hasFilter = true;
-        }
-        // Entre X et Y
-        elseif (str_contains($message, 'entre') && count($prices) >= 2) {
-            $query->whereBetween('price', [(int)$prices[0], (int)$prices[1]]);
-            $hasFilter = true;
+        if ($filteredHotels->isEmpty()) {
+            return [
+                'type' => 'text',
+                'reply' => "🔍 Je ne trouve pas d'hôtel correspondant à votre recherche. Pouvez-vous me donner plus de détails (nom, quartier, budget) ?"
+            ];
         }
         
-        // Extraction des villes/zones
-        $zones = [
-            'dakar' => 'Dakar', 'ngor' => 'Ngor', 'almadie' => 'Almadies',
-            'plateau' => 'Plateau', 'yoff' => 'Yoff', 'ouakam' => 'Ouakam',
-            'mermoz' => 'Mermoz', 'sicap' => 'Sicap', 'liberté' => 'Liberté',
-            'saly' => 'Saly', 'mbour' => 'Mbour', 'la somone' => 'La Somone',
-            'lac rose' => 'Lac Rose', 'sine saloum' => 'Sine Saloum'
-        ];
-        
-        foreach ($zones as $zoneKey => $zoneName) {
-            if (str_contains($message, $zoneKey)) {
-                $query->where('address', 'like', "%{$zoneName}%");
-                $hasFilter = true;
-                break;
-            }
-        }
-        
-        // Recherche par nom d'hôtel
-        $hotelNames = ['rade', 'terrou', 'radisson', 'king fahd', 'pullman'];
-        foreach ($hotelNames as $name) {
-            if (str_contains($message, $name)) {
-                $query->where('name', 'like', "%{$name}%");
-                $hasFilter = true;
-                break;
-            }
-        }
-        
-        return $hasFilter;
-    }
-    
-    /**
-     * Réponse naturelle de salutation
-     */
-    private function naturalGreeting(): JsonResponse
-    {
-        $replies = [
-            "Bonjour ! 👋 Je suis votre assistant. Dites-moi ce que vous cherchez : un hôtel dans un quartier spécifique, à un certain prix, ou avec des services particuliers ?",
-            "Salut ! 😊 Comment puis-je vous aider à trouver l'hôtel idéal aujourd'hui ? Donnez-moi votre budget ou le quartier souhaité.",
-            "Bonjour et bienvenue ! 🌟 Je suis là pour vous aider à trouver un hôtel. Quel est votre budget ou votre quartier préféré ?"
-        ];
-        
-        return response()->json([
-            'type' => 'text',
-            'reply' => $replies[array_rand($replies)]
-        ]);
-    }
-    
-    /**
-     * Réponse pour les remerciements
-     */
-    private function thankYouResponse(): JsonResponse
-    {
-        $replies = [
-            "Avec plaisir ! 😊 N'hésitez pas si je peux faire autre chose pour vous.",
-            "Je vous en prie ! 🎉 Bonne journée et à bientôt.",
-            "Service ! ✨ Si vous avez besoin d'autres informations, je suis là."
-        ];
-        
-        return response()->json([
-            'type' => 'text',
-            'reply' => $replies[array_rand($replies)]
-        ]);
-    }
-    
-    /**
-     * Réponse naturelle selon les résultats
-     */
-    private function naturalResponse(Collection $hotels, string $message, string $currency, string $intent): JsonResponse
-    {
-        if ($hotels->isEmpty()) {
-            return $this->noResultsResponse($message, $currency);
-        }
-        
-        // Réponse avec résultats
-        $intro = $this->getNaturalIntro($hotels->count(), $message, $currency);
-        
-        return response()->json([
+        return [
             'type' => 'hotels',
-            'count' => $hotels->count(),
-            'message' => $intro,
-            'data' => $hotels->map(function (Hotel $hotel) {
+            'count' => $filteredHotels->count(),
+            'message' => "Voici les hôtels trouvés :",
+            'data' => $filteredHotels->map(function ($hotel) {
                 return [
                     'id' => $hotel->id,
                     'name' => $hotel->name,
@@ -234,98 +173,8 @@ class ChatController extends Controller
                     'image' => $hotel->image,
                     'phone' => $hotel->phone ?? 'Non renseigné',
                     'email' => $hotel->email ?? 'Non renseigné',
-                    'description' => $hotel->description ?? ''
                 ];
-            })
-        ]);
-    }
-    
-    /**
-     * Introduction naturelle selon le contexte
-     */
-    private function getNaturalIntro(int $count, string $message, string $currency): string
-    {
-        // Extraire le prix si présent
-        preg_match('/(\d+)/', $message, $priceMatch);
-        $price = $priceMatch[1] ?? null;
-        
-        // Extraire la zone
-        $zones = ['dakar', 'ngor', 'saly', 'mbour', 'plateau', 'almadie', 'yoff'];
-        $foundZone = null;
-        foreach ($zones as $zone) {
-            if (str_contains($message, $zone)) {
-                $foundZone = ucfirst($zone);
-                break;
-            }
-        }
-        
-        if ($count === 1) {
-            if ($price) {
-                return "🎉 J'ai trouvé un hôtel à {$price} {$currency} pour vous :";
-            }
-            if ($foundZone) {
-                return "📍 Voici un hôtel situé à {$foundZone} qui pourrait vous plaire :";
-            }
-            return "🏨 Voici l'hôtel que j'ai trouvé pour vous :";
-        }
-        
-        if ($count <= 3) {
-            if ($price && str_contains($message, 'moins')) {
-                return "💰 J'ai trouvé {$count} hôtels à moins de {$price} {$currency} :";
-            }
-            if ($price && str_contains($message, 'plus')) {
-                return "💰 J'ai trouvé {$count} hôtels à plus de {$price} {$currency} :";
-            }
-            if ($foundZone) {
-                return "📍 Voici {$count} hôtels situés à {$foundZone} :";
-            }
-            return "🏨 J'ai trouvé {$count} hôtels qui correspondent à votre recherche :";
-        }
-        
-        return "🏨 J'ai trouvé {$count} hôtels qui pourraient vous intéresser. En voici quelques-uns :";
-    }
-    
-    /**
-     * Réponse quand aucun résultat
-     */
-    private function noResultsResponse(string $message, string $currency): JsonResponse
-    {
-        preg_match('/(\d+)/', $message, $priceMatch);
-        $price = $priceMatch[1] ?? null;
-        
-        $zones = ['dakar', 'ngor', 'saly', 'mbour', 'plateau', 'almadie', 'yoff'];
-        $foundZone = null;
-        foreach ($zones as $zone) {
-            if (str_contains($message, $zone)) {
-                $foundZone = ucfirst($zone);
-                break;
-            }
-        }
-        
-        if ($price && $foundZone) {
-            return response()->json([
-                'type' => 'text',
-                'reply' => "😕 Je suis désolé, je n'ai pas trouvé d'hôtel à {$foundZone} avec un budget de {$price} {$currency}. Voulez-vous que je cherche avec un budget différent ou dans un autre quartier ?"
-            ]);
-        }
-        
-        if ($price) {
-            return response()->json([
-                'type' => 'text',
-                'reply' => "😕 Désolé, aucun hôtel trouvé à {$price} {$currency}. Quel est votre budget maximum ? Je peux vous proposer des alternatives."
-            ]);
-        }
-        
-        if ($foundZone) {
-            return response()->json([
-                'type' => 'text',
-                'reply' => "📍 Je n'ai pas encore d'hôtel à {$foundZone}. Essayez Dakar, Ngor ou Saly ? Je vous trouverai quelque chose de bien !"
-            ]);
-        }
-        
-        return response()->json([
-            'type' => 'text',
-            'reply' => "Je n'ai pas trouvé d'hôtel correspondant. Pouvez-vous me donner plus de détails ? Votre budget, un quartier, ou le nom d'un hôtel que vous cherchez ?"
-        ]);
+            })->values()
+        ];
     }
 }

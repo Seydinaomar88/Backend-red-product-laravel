@@ -23,7 +23,7 @@ class PasswordChangedMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '🔒 Votre mot de passe a été modifié',
+            subject: 'Votre mot de passe a été modifié',
         );
     }
 

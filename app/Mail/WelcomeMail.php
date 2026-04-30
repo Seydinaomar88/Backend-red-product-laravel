@@ -23,7 +23,7 @@ class WelcomeMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '🎉 Bienvenue sur Red Product',
+            subject: 'Bienvenue sur Red Product',
         );
     }
 
