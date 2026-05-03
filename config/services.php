@@ -35,6 +35,4 @@ return [
         ],
     ],
 
-    'xai' => ['api_key' => env('XAI_API_KEY')],
-
 ];
